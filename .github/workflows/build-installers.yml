@@ -17,7 +17,7 @@ jobs:
             artifact: DentalClinic-Setup-1.0.0.exe
           - os: macos-latest
             name: macos
-            run: npx electron-builder --mac
+            run: npm run dist
             artifact: DentalClinic-Mac-1.0.0-arm64.dmg
     runs-on: ${{ matrix.os }}
     steps:
