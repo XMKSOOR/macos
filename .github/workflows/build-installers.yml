@@ -1,0 +1,46 @@
+name: Build installers (Windows + macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+            run: npm run dist
+            artifact: DentalClinic-Setup-1.0.0.exe
+          - os: macos-latest
+            name: macos
+            run: npx electron-builder --mac
+            artifact: DentalClinic-Mac-1.0.0-arm64.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build ${{ matrix.name }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: ${{ matrix.run }}
+
+      - name: Upload ${{ matrix.name }} installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error

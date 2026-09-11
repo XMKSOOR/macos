@@ -1,0 +1,91 @@
+import type {
+  Appointment,
+  CatalogItem,
+  DashboardStats,
+  Expense,
+  Invoice,
+  InvoiceItem,
+  Material,
+  Patient,
+  PrinterInfo,
+  Settings,
+  StockMovement,
+  User
+} from '@shared/types'
+import type { PermissionKey, PermissionOverride, Role, SheetSchemaKey } from '@shared/types'
+import { can as baseCan } from '@shared/types'
+
+export type {
+  Appointment,
+  CatalogItem,
+  DashboardStats,
+  Expense,
+  Invoice,
+  InvoiceItem,
+  Material,
+  Patient,
+  PermissionKey,
+  PermissionOverride,
+  PrinterInfo,
+  Role,
+  Settings,
+  SheetSchemaKey,
+  StockMovement,
+  User
+}
+
+let permOverride: PermissionOverride = {}
+
+export function setCurrentPerms(p: PermissionOverride): void {
+  permOverride = p
+}
+
+export function can(role: Role, perm: PermissionKey): boolean {
+  return baseCan(role, perm, permOverride)
+}
+
+export { SHEET_SCHEMAS } from '@shared/types'
+export { PERMISSION_LABELS, PERMISSIONS } from '@shared/types'
+
+export type ScreenKey =
+  | 'dashboard'
+  | 'patients'
+  | 'appointments'
+  | 'billing'
+  | 'catalog'
+  | 'inventory'
+  | 'expenses'
+  | 'users'
+  | 'settings'
+  | 'finances'
+
+export interface Toast {
+  id: number
+  kind: 'success' | 'error' | 'info'
+  message: string
+}
+
+export function fmt(n: number): string {
+  return n.toLocaleString('en-US')
+}
+
+const AR_DIGITS = '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669'
+const FA_DIGITS = '\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9'
+const DIGIT_MAP: Record<string, string> = {}
+for (let i = 0; i < 10; i++) {
+  DIGIT_MAP[AR_DIGITS[i]] = String(i)
+  DIGIT_MAP[FA_DIGITS[i]] = String(i)
+}
+
+/** تحويل أي أرقام عربية/فارسية (٠١٢٣٤٥٦٧٨٩ أو ۰۱۲۳...) إلى أرقام إنجليزية 1234567890 */
+export function toLatinDigits(s: string): string {
+  return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => DIGIT_MAP[d] ?? d)
+}
+
+export function useToday(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+export function today(): string {
+  return new Date().toISOString().slice(0, 10)
+}
