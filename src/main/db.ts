@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync } from './sqlite'
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
@@ -52,8 +52,8 @@ export function initDb(): void {
   const dir = join(dbPath, '..')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   db = new DatabaseSync(dbPath)
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA foreign_keys = ON')
+  db.setJournalMode('WAL')
+  db.enableForeignKeys()
   migrate()
   upgradeSeedsToStudy()
   try {
@@ -1102,8 +1102,8 @@ export function reopenDb(): void {
   const dir = join(dbPath, '..')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   db = new DatabaseSync(dbPath)
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA foreign_keys = ON')
+  db.setJournalMode('WAL')
+  db.enableForeignKeys()
 }
 
 export function replaceDbFrom(src: string): void {
@@ -1113,7 +1113,7 @@ export function replaceDbFrom(src: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   copyFileSync(src, dbPath)
   db = new DatabaseSync(dbPath)
-  db.exec('PRAGMA journal_mode = WAL')
-  db.exec('PRAGMA foreign_keys = ON')
+  db.setJournalMode('WAL')
+  db.enableForeignKeys()
   migrate()
 }
