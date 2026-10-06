@@ -85,6 +85,7 @@ import { can } from '../shared/types'
 import { applyCurrencyScale, backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
 import { mysqlConfig, mysqlPull, mysqlPush, mysqlTest } from './mysql'
 import { supabaseConfig, supabasePull, supabasePush, supabaseTest } from './supabase'
+import { cloudPull, cloudPush, cloudTest } from './cloud'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
 
@@ -602,6 +603,21 @@ export function registerIpc(ipc: IpcMain): void {
     return supabasePull()
   })
   handle('supabase:config', () => !!supabaseConfig())
+
+  // ---- Supabase Postgres sync (لتطبيق الجوال) ----
+  handle('cloud:test', async () => {
+    requireAuth('manageSettings')
+    return cloudTest()
+  })
+  handle('cloud:push', async () => {
+    requireAuth('manageSettings')
+    return cloudPush()
+  })
+  handle('cloud:pull', async () => {
+    requireAuth('manageSettings')
+    return cloudPull()
+  })
+  handle('cloud:config', () => !!supabaseConfig())
 }
 
 function buildReceiptHtml(

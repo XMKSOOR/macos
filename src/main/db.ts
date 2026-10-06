@@ -354,7 +354,8 @@ function seed(): void {
     ['mysql_auto', '0'],
     ['supabase_url', ''],
     ['supabase_key', ''],
-    ['supabase_auto', '0']
+    ['supabase_auto', '0'],
+    ['supabase_pg_auto', '0']
   ]
   const set = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?,?)')
   for (const [k, v] of defaults) set.run(k, v)
@@ -405,6 +406,7 @@ export function getSettings(): Settings {
     supabase_url: out.supabase_url ?? '',
     supabase_key: out.supabase_key ?? '',
     supabase_auto: out.supabase_auto ?? '0',
+    supabase_pg_auto: out.supabase_pg_auto ?? '0',
     feasibility_seed: out.feasibility_seed ?? '0',
     feasibility_plan: out.feasibility_plan ?? '',
     feasibility_seed2: out.feasibility_seed2 ?? '0'

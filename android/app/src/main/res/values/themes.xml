@@ -1,0 +1,6 @@
+<resources>
+  <style name="Theme.ClinicCompanion" parent="android:Theme.Material.Light.NoActionBar">
+    <item name="android:statusBarColor">#0f766e</item>
+    <item name="android:windowBackground">#f6f7f9</item>
+  </style>
+</resources>

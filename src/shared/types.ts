@@ -269,6 +269,7 @@ export interface Settings {
   supabase_url: string
   supabase_key: string
   supabase_auto: string
+  supabase_pg_auto: string
   feasibility_seed: string
   feasibility_plan?: string
   feasibility_seed2?: string

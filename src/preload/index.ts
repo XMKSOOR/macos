@@ -162,6 +162,12 @@ const api = {
     push: (): Promise<string> => invoke('supabase:push'),
     pull: (): Promise<string> => invoke('supabase:pull'),
     config: (): Promise<boolean> => invoke('supabase:config')
+  },
+  cloud: {
+    test: (): Promise<string> => invoke('cloud:test'),
+    push: (): Promise<string> => invoke('cloud:push'),
+    pull: (): Promise<string> => invoke('cloud:pull'),
+    config: (): Promise<boolean> => invoke('cloud:config')
   }
 }
 

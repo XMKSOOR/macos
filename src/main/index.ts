@@ -6,6 +6,7 @@ import { registerIpc } from './ipc'
 import { drivePullOnStart, driveSyncOnQuit } from './sync'
 import { mysqlPullOnStart, mysqlPushOnQuit } from './mysql'
 import { supabasePullOnStart, supabasePushOnQuit } from './supabase'
+import { cloudPullOnStart, cloudPushOnQuit } from './cloud'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
 
@@ -129,6 +130,7 @@ app.whenReady().then(() => {
   void drivePullOnStart()
   void mysqlPullOnStart()
   void supabasePullOnStart()
+  void cloudPullOnStart()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -138,7 +140,7 @@ app.whenReady().then(() => {
 app.on('before-quit', (e) => {
   if (!(process.env['SKIP_SYNC'] === '1')) {
     e.preventDefault()
-    Promise.all([driveSyncOnQuit(), mysqlPushOnQuit(), supabasePushOnQuit()]).finally(() => app.exit(0))
+    Promise.all([driveSyncOnQuit(), mysqlPushOnQuit(), supabasePushOnQuit(), cloudPushOnQuit()]).finally(() => app.exit(0))
   }
 })
 

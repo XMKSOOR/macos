@@ -35,6 +35,7 @@ export default function SettingsScreen({
     supabase_url: '',
     supabase_key: '',
     supabase_auto: '0',
+    supabase_pg_auto: '0',
     feasibility_seed: '0'
   })
   const [printers, setPrinters] = useState<PrinterInfo[]>([])
@@ -121,7 +122,8 @@ export default function SettingsScreen({
       .save({
         supabase_url: form.supabase_url.trim(),
         supabase_key: form.supabase_key.trim(),
-        supabase_auto: form.supabase_auto
+        supabase_auto: form.supabase_auto,
+        supabase_pg_auto: form.supabase_pg_auto
       })
       .then(() => {
         toast('تم حفظ إعدادات Supabase', 'success')
@@ -576,6 +578,50 @@ export default function SettingsScreen({
             «رفع نسخة» تخزّن نسخة كاملة من قاعدة بيانات العيادة في مساحة تخزين Supabase، و«سحب» يستبدل بيانات هذا الجهاز بآخر نسخة مرفوعة.
             استخدم المفتاح السري (service_role) من إعدادات المشروع في لوحة Supabase.
           </p>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>تطبيق الجوال (Supabase Postgres)</h2>
+        </div>
+        <div className="panel-body">
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+            يزامن هذا الجهاز بيانات العيادة إلى جداول Postgres داخل مشروع Supabase نفسه، ليتصفّحها تطبيق الأندرويد.
+            يستخدم عنوان المشروع والمفتاح السري أعلاه. نفّذ ملف <code dir="ltr">supabase/schema.sql</code> في محرر SQL مرة واحدة قبل أول رفع.
+          </p>
+          <div className="form-grid">
+            <Field label="مزامنة تلقائية مع Postgres (عند الإغلاق + الفتح)">
+              <select value={form.supabase_pg_auto} onChange={(e) => setForm({ ...form, supabase_pg_auto: e.target.value })}>
+                <option value="1">مفعّل</option>
+                <option value="0">معطّل</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-16">
+            <button className="ghost" onClick={saveSupabase} disabled={busy === 'supabase-save'}>
+              حفظ إعدادات Postgres
+            </button>
+          </div>
+          <div className="toolbar mt-16">
+            <button className="soft" onClick={() => doSupabase('cloud-test', () => window.clinic.cloud.test())} disabled={busy !== ''}>
+              📡 اختبار اتصال Postgres
+            </button>
+            <button
+              className="soft"
+              onClick={() => doSupabase('cloud-up', () => window.clinic.cloud.push())}
+              disabled={busy !== '' || !(form.supabase_url && form.supabase_key)}
+            >
+              ⬆ رفع البيانات إلى Postgres
+            </button>
+            <button
+              className="soft"
+              onClick={() => doSupabase('cloud-down', () => window.clinic.cloud.pull())}
+              disabled={busy !== '' || !(form.supabase_url && form.supabase_key)}
+            >
+              ⬇ سحب البيانات من Postgres
+            </button>
+          </div>
         </div>
       </div>
 
