@@ -43,7 +43,7 @@ fun LoadingBox(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ErrorPane(message: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun ErrorPane(message: String, modifier: Modifier = Modifier, onRetry: (() -> Unit)? = null) {
   Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
       Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyLarge)

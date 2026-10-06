@@ -6,7 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -35,7 +35,7 @@ fun MainScaffold(
     Tab("الرئيسية", Icons.Filled.Home),
     Tab("المرضى", Icons.Filled.People),
     Tab("المواعيد", Icons.Filled.CalendarMonth),
-    Tab("الفواتير", Icons.Filled.ReceiptLong),
+    Tab("الفواتير", Icons.AutoMirrored.Filled.ReceiptLong),
     Tab("الإعدادات", Icons.Filled.Settings)
   )
   var tab by remember { mutableIntStateOf(0) }
