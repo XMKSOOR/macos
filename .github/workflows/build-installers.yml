@@ -15,11 +15,11 @@ jobs:
           - os: windows-latest
             name: windows
             run: npm run dist -- --publish never
-            artifact: dist/DentalClinic-Setup-*.exe
+            artifact: DentalClinic-Setup-*.exe
           - os: macos-latest
             name: macos
             run: npm run dist -- --publish never
-            artifact: dist/DentalClinic-Mac-*.dmg
+            artifact: DentalClinic-Mac-*.dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
