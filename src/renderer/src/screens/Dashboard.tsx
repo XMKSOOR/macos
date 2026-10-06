@@ -4,7 +4,13 @@ import { CurrencyCell, Empty, StatusBadge } from '../ui'
 import type { DashboardStats, Settings } from '../lib'
 import { fmt } from '../lib'
 
-export default function Dashboard({ settings }: { settings: Settings | null }): React.JSX.Element {
+export default function Dashboard({
+  settings,
+  onOpenPatient
+}: {
+  settings: Settings | null
+  onOpenPatient?: (id: number) => void
+}): React.JSX.Element {
   const [period, setPeriod] = useState('7')
   const [stats, setStats] = useState<DashboardStats | null>(null)
 
@@ -51,33 +57,33 @@ export default function Dashboard({ settings }: { settings: Settings | null }): 
         <div className="card">
           <div className="label">الدخل المحصَّل</div>
           <div className="value">{stats ? `$${incomeUsd.toFixed(2)}` : '—'}</div>
-          <div className="sub">{(stats?.income ?? 0).toLocaleString('en-US')} ل.ل</div>
+          <div className="sub">{(stats?.income ?? 0).toLocaleString('en-US')} ل.س</div>
         </div>
         <div className="card">
           <div className="label">المصاريف</div>
           <div className="value">{stats ? `$${expensesUsd.toFixed(2)}` : '—'}</div>
-          <div className="sub">{(stats?.expenses ?? 0).toLocaleString('en-US')} ل.ل</div>
+          <div className="sub">{(stats?.expenses ?? 0).toLocaleString('en-US')} ل.س</div>
         </div>
         <div className="card">
           <div className="label">صافي الربح</div>
           <div className="value" style={{ color: net >= 0 ? 'var(--success)' : 'var(--danger)' }}>
             {stats ? `${((net) / rate).toFixed(2)} $` : '—'}
           </div>
-          <div className="sub">{fmt(net)} ل.ل</div>
+          <div className="sub">{fmt(net)} ل.س</div>
         </div>
         <div className="card">
           <div className="label">الربح الأصيل (بعد كلفة البيع والمصاريف)</div>
           <div className="value" style={{ color: (stats?.margin ?? 0) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
             {stats ? `${((stats.margin) / rate).toFixed(2)} $` : '—'}
           </div>
-          <div className="sub">{fmt(stats?.margin ?? 0)} ل.ل</div>
+          <div className="sub">{fmt(stats?.margin ?? 0)} ل.س</div>
         </div>
         <div className="card">
           <div className="label">الذمم غير المحصلة</div>
           <div className="value" style={{ color: 'var(--danger)' }}>
             {stats ? `$${unpaidUsd.toFixed(0)}` : '—'}
           </div>
-          <div className="sub">{fmt(stats?.unpaid_total ?? 0)} ل.ل</div>
+          <div className="sub">{fmt(stats?.unpaid_total ?? 0)} ل.س</div>
         </div>
         <div className="card">
           <div className="label">مواد تحت الحد الأدنى</div>
@@ -140,7 +146,15 @@ export default function Dashboard({ settings }: { settings: Settings | null }): 
                   stats.recent_invoices.map((inv) => (
                     <tr key={inv.id}>
                       <td>#{inv.invoice_no}</td>
-                      <td>{inv.patient_name}</td>
+                      <td>
+                        {inv.patient_id && onOpenPatient ? (
+                          <button className="link" onClick={() => onOpenPatient(inv.patient_id)}>
+                            {inv.patient_name}
+                          </button>
+                        ) : (
+                          inv.patient_name
+                        )}
+                      </td>
                       <td>{inv.date}</td>
                       <td>
                         <CurrencyCell lbp={inv.total} rate={rate} />

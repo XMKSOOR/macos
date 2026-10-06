@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Field, useToast } from '../ui'
 import type { PrinterInfo, Settings } from '../lib'
+import { toLatinDigits } from '../lib'
 
 export default function SettingsScreen({
   settings,
@@ -31,6 +32,9 @@ export default function SettingsScreen({
     mysql_user: '',
     mysql_secret: '',
     mysql_auto: '0',
+    supabase_url: '',
+    supabase_key: '',
+    supabase_auto: '0',
     feasibility_seed: '0'
   })
   const [printers, setPrinters] = useState<PrinterInfo[]>([])
@@ -104,6 +108,30 @@ export default function SettingsScreen({
   }
 
   const doMysql = (key: string, fn: () => Promise<unknown>): void => {
+    setBusy(key)
+    fn()
+      .then((r) => r && toast(String(r), 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const saveSupabase = (): void => {
+    setBusy('supabase-save')
+    window.clinic.settings
+      .save({
+        supabase_url: form.supabase_url.trim(),
+        supabase_key: form.supabase_key.trim(),
+        supabase_auto: form.supabase_auto
+      })
+      .then(() => {
+        toast('تم حفظ إعدادات Supabase', 'success')
+        onSaved()
+      })
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const doSupabase = (key: string, fn: () => Promise<unknown>): void => {
     setBusy(key)
     fn()
       .then((r) => r && toast(String(r), 'success'))
@@ -227,11 +255,11 @@ export default function SettingsScreen({
         </div>
         <div className="panel-body">
           <div className="form-grid">
-            <Field label="سعر الصرف (ل.ل الجديدة مقابل $)">
+            <Field label="سعر الصرف (ل.س الجديدة مقابل $)">
               <input
-                type="number"
+                type="number" dir="ltr" inputMode="decimal"
                 value={form.usd_rate}
-                onChange={(e) => setForm({ ...form, usd_rate: Number(e.target.value) })}
+                onChange={(e) => setForm({ ...form, usd_rate: Number(toLatinDigits(e.target.value)) })}
               />
             </Field>
             <Field label="معامل حذف الأصفار من العملة">
@@ -259,7 +287,7 @@ export default function SettingsScreen({
           </div>
           <p className="muted mt-8" style={{ fontSize: 12 }}>
             عند الضغط تُقسَّم جميع المبالغ المحفوظة (أصناف الكتالوج، كلف المواد، الفواتير وبنودها، المصاريف) وسعر الصرف نفسه على المعامل (مثلاً 100):
-            يصبح 1,000,000 ل.ل القديمة = 10,000 ل.ل الجديدة، ويُعاد حساب كل مبالغ الدولار تلقائياً. الزر يعمل في كل ضغطة، ولا يتم التحويل تلقائياً عند إقلاع البرنامج.
+            يصبح 1,000,000 ل.س القديمة = 10,000 ل.س الجديدة، ويُعاد حساب كل مبالغ الدولار تلقائياً. الزر يعمل في كل ضغطة، ولا يتم التحويل تلقائياً عند إقلاع البرنامج.
           </p>
         </div>
       </div>
@@ -486,6 +514,67 @@ export default function SettingsScreen({
           <p className="muted mt-8" style={{ fontSize: 12 }}>
             «رفع نسخة» تكتب كل بيانات العيادة إلى قاعدتك السحابية (تُرى من موقع phpMyAdmin)، و«سحب» يعيدها إلى هذا الجهاز.
             يمكنك تغيير هذه الخيارات في أي وقت من هنا.
+          </p>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>قاعدة البيانات السحابية (Supabase Storage)</h2>
+        </div>
+        <div className="panel-body">
+          <div className="form-grid">
+            <Field label="عنوان المشروع (Project URL)">
+              <input
+                value={form.supabase_url}
+                onChange={(e) => setForm({ ...form, supabase_url: e.target.value })}
+                placeholder="https://xxxxxxxx.supabase.co"
+                dir="ltr"
+              />
+            </Field>
+            <Field label="المفتاح السري (service_role / secret key)">
+              <input
+                type="password"
+                value={form.supabase_key}
+                onChange={(e) => setForm({ ...form, supabase_key: e.target.value })}
+                placeholder="eyJhbGciOi..."
+                dir="ltr"
+              />
+            </Field>
+            <Field label="رفع تلقائي عند الإغلاق + سحب عند الفتح">
+              <select value={form.supabase_auto} onChange={(e) => setForm({ ...form, supabase_auto: e.target.value })}>
+                <option value="1">مفعّل</option>
+                <option value="0">معطّل</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-16">
+            <button className="ghost" onClick={saveSupabase} disabled={busy === 'supabase-save'}>
+              حفظ بيانات Supabase
+            </button>
+          </div>
+          <div className="toolbar mt-16">
+            <button className="soft" onClick={() => doSupabase('supabase-test', () => window.clinic.supabase.test())} disabled={busy !== ''}>
+              📡 اختبار الاتصال
+            </button>
+            <button
+              className="soft"
+              onClick={() => doSupabase('supabase-up', () => window.clinic.supabase.push())}
+              disabled={busy !== '' || !(form.supabase_url && form.supabase_key)}
+            >
+              ⬆ رفع نسخة كاملة الآن
+            </button>
+            <button
+              className="soft"
+              onClick={() => doSupabase('supabase-down', () => window.clinic.supabase.pull())}
+              disabled={busy !== '' || !(form.supabase_url && form.supabase_key)}
+            >
+              ⬇ سحب آخر نسخة من الخادم
+            </button>
+          </div>
+          <p className="muted mt-8" style={{ fontSize: 12 }}>
+            «رفع نسخة» تخزّن نسخة كاملة من قاعدة بيانات العيادة في مساحة تخزين Supabase، و«سحب» يستبدل بيانات هذا الجهاز بآخر نسخة مرفوعة.
+            استخدم المفتاح السري (service_role) من إعدادات المشروع في لوحة Supabase.
           </p>
         </div>
       </div>

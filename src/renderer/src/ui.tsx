@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 import { fmt } from './lib'
 import type { Toast } from './lib'
 
@@ -54,13 +54,15 @@ export function Modal({
   onClose,
   children,
   footer,
-  wide
+  wide,
+  full
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
   wide?: boolean
+  full?: boolean
 }): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -69,9 +71,18 @@ export function Modal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // الإغلاق بالضغط على الخلفية فقط: نعتمد mousedown مع مطابقة الهدف،
+  // حتى لا تُغلق النافذة عند تحديد نص داخلها أو عند فتح قائمة select أصلية
+  // التي قد تُطلق up خارج حدود النافذة.
+  const onBackdropDown = (e: MouseEvent<HTMLDivElement>): void => {
+    if (e.target !== e.currentTarget) return
+    onClose()
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className={`modal ${wide ? 'wide' : ''}`} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" onMouseDown={onBackdropDown}>
+      <div className={`modal ${wide ? 'wide' : ''} ${full ? 'full' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
           <button className="close-x" onClick={onClose} aria-label="إغلاق">
@@ -128,7 +139,7 @@ export function CurrencyCell({ lbp, rate }: { lbp: number; rate: number }): Reac
   const usd = rate > 0 ? (lbp / rate).toFixed(2) : '0.00'
   return (
     <div>
-      <div className="amount-lbp">{fmt(lbp)} ل.ل</div>
+      <div className="amount-lbp">{fmt(lbp)} ل.س</div>
       <div className="amount-usd">{usd} $</div>
     </div>
   )

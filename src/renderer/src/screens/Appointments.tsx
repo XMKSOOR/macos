@@ -6,8 +6,20 @@ import ExcelBar from '../excel'
 import type { Appointment, Patient, Role } from '../lib'
 import { can, today } from '../lib'
 
-const cols: Col<Appointment>[] = [
-  { key: 'patient_name', label: 'المريض', type: 'display' },
+const cols = (onOpenPatient?: (id: number) => void): Col<Appointment>[] => [
+  {
+    key: 'patient_name',
+    label: 'المريض',
+    type: 'display',
+    render: (a) =>
+      a.patient_id && onOpenPatient ? (
+        <button className="link" onClick={() => onOpenPatient(a.patient_id)}>
+          {a.patient_name}
+        </button>
+      ) : (
+        a.patient_name
+      )
+  },
   { key: 'date', label: 'التاريخ', type: 'date' },
   { key: 'time', label: 'الوقت' },
   { key: 'reason', label: 'السبب' },
@@ -25,7 +37,13 @@ const cols: Col<Appointment>[] = [
   { key: 'notes', label: 'ملاحظات' }
 ]
 
-export default function Appointments({ role }: { role: Role }): React.JSX.Element {
+export default function Appointments({
+  role,
+  onOpenPatient
+}: {
+  role: Role
+  onOpenPatient?: (id: number) => void
+}): React.JSX.Element {
   const [list, setList] = useState<Appointment[]>([])
   const [patients, setPatients] = useState<Patient[]>([])
   const [dateFilter, setDateFilter] = useState('')
@@ -163,7 +181,7 @@ export default function Appointments({ role }: { role: Role }): React.JSX.Elemen
         <div className="panel-body">
           <DataGrid
             rows={list}
-            cols={cols}
+            cols={cols(onOpenPatient)}
             rowKey={(a) => a.id}
             canEdit={canEdit}
             onSave={onRowSave}

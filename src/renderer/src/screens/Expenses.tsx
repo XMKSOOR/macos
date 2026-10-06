@@ -3,11 +3,18 @@ import { Confirm, CurrencyCell, Empty, Field, Modal, useToast } from '../ui'
 import DataGrid from '../table'
 import type { Col } from '../table'
 import ExcelBar from '../excel'
-import type { Expense, Role, Settings } from '../lib'
-import { can, fmt, today } from '../lib'
+import type { DueRecurringExpense, Expense, Recurrence, Role, Settings } from '../lib'
+import { can, today } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 const CATEGORIES = ['رواتب وأجور', 'إيجار', 'كهرباء ومحروقات', 'أجهزة ومعدات', 'نظافة وتعقيم', 'أدوية ومواد', 'صيانة', 'أخرى']
+
+const RECURRENCE_OPTIONS: { value: Recurrence; label: string }[] = [
+  { value: 'monthly', label: 'شهري' },
+  { value: 'quarterly', label: 'كل 3 أشهر' },
+  { value: 'yearly', label: 'سنوي' },
+  { value: 'weekly', label: 'أسبوعي' }
+]
 
 const cols: Col<Expense>[] = [
   { key: 'date', label: 'التاريخ', type: 'date' },
@@ -18,13 +25,24 @@ const cols: Col<Expense>[] = [
     options: CATEGORIES.map((c) => ({ value: c, label: c }))
   },
   { key: 'amount', label: 'المبلغ', type: 'money' },
-  {
-    key: 'amount_usd',
-    label: 'المبلغ ($)',
-    type: 'display',
-    render: (e) => <span dir="ltr">{e.amount_usd ? `${fmt(e.amount_usd)} $` : '—'}</span>
-  },
   { key: 'note', label: 'الملاحظة' },
+  {
+    key: 'next_due',
+    label: 'الاستحقاق التالي',
+    type: 'display',
+    render: (e) =>
+      e.is_recurring && e.next_due ? (
+        <span>
+          {e.next_due}
+          <span className="muted">
+            {' '}
+            ({RECURRENCE_OPTIONS.find((r) => r.value === (e.recurrence ?? 'monthly'))?.label ?? 'شهري'})
+          </span>
+        </span>
+      ) : (
+        <span className="muted">—</span>
+      )
+  },
   { key: 'created_by', label: 'سجّله', type: 'display' }
 ]
 
@@ -33,13 +51,25 @@ export default function Expenses({ settings, role }: { settings: Settings | null
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [modal, setModal] = useState(false)
-  const [form, setForm] = useState<{ category: string; amount: string; note: string; date: string }>({
+  const [form, setForm] = useState<{
+    category: string
+    amount: string
+    note: string
+    date: string
+    is_recurring: boolean
+    recurrence: Recurrence
+    next_due: string
+  }>({
     category: '',
     amount: '',
     note: '',
-    date: today()
+    date: today(),
+    is_recurring: false,
+    recurrence: 'monthly',
+    next_due: ''
   })
   const [deleting, setDeleting] = useState<Expense | null>(null)
+  const [due, setDue] = useState<DueRecurringExpense[]>([])
   const toast = useToast()
   const rate = settings?.usd_rate ?? 130
 
@@ -64,6 +94,13 @@ export default function Expenses({ settings, role }: { settings: Settings | null
     load(from, to)
   }, [load, from, to])
 
+  useEffect(() => {
+    window.clinic.expenses
+      .due(7)
+      .then(setDue)
+      .catch(() => setDue([]))
+  }, [])
+
   const total = list.reduce((s, e) => s + e.amount, 0)
 
   const save = (): void => {
@@ -76,11 +113,20 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       return
     }
     window.clinic.expenses
-      .create({ category: form.category, amount: Math.round(Number(form.amount)), note: form.note, date: form.date })
+      .create({
+        category: form.category,
+        amount: Math.round(Number(form.amount)),
+        note: form.note,
+        date: form.date,
+        is_recurring: form.is_recurring ? 1 : 0,
+        recurrence: form.recurrence,
+        next_due: form.next_due
+      })
       .then(() => {
         toast('تم الحفظ', 'success')
         setModal(false)
         load(from, to)
+        window.clinic.expenses.due(7).then(setDue).catch(() => {})
       })
       .catch((e) => toast(e.message, 'error'))
   }
@@ -95,6 +141,17 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       })
       .catch((e) => toast(e.message, 'error'))
     setDeleting(null)
+  }
+
+  const runDue = (): void => {
+    window.clinic.expenses
+      .runDue()
+      .then((n) => {
+        toast(n > 0 ? `تم توليد ${n} مصروف متكرر` : 'لا توجد مصاريف مستحقة الآن', 'success')
+        load(from, to)
+        window.clinic.expenses.due(7).then(setDue).catch(() => {})
+      })
+      .catch((e) => toast(e.message, 'error'))
   }
 
   const onRowSave = useCallback(
@@ -152,6 +209,54 @@ export default function Expenses({ settings, role }: { settings: Settings | null
 
   return (
     <div>
+      {due.length > 0 && (
+        <div className="panel" style={{ marginBottom: 16, borderRight: '3px solid var(--warn)' }}>
+          <div className="panel-head">
+            <h2>مصاريف متكررة تستحق قريباً</h2>
+            <div className="toolbar">
+              <span className="muted">{due.length} بند خلال 7 أيام</span>
+              <button className="soft small" onClick={runDue}>
+                تسجيل المصاريف المستحقة الآن
+              </button>
+            </div>
+          </div>
+          <div className="panel-body">
+            <div className="table-wrap">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>التصنيف</th>
+                    <th>الاستحقاق</th>
+                    <th>المتبقي</th>
+                    <th>المبلغ</th>
+                    <th>الملاحظة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {due.map((d) => (
+                    <tr key={d.id}>
+                      <td>{d.category}</td>
+                      <td>{d.next_due}</td>
+                      <td>
+                        {d.days_left <= 0 ? (
+                          <span style={{ color: 'var(--danger)', fontWeight: 700 }}>مستحق الآن</span>
+                        ) : (
+                          <span className="muted">بعد {d.days_left} يوم</span>
+                        )}
+                      </td>
+                      <td>
+                        <CurrencyCell lbp={d.amount} rate={rate} />
+                      </td>
+                      <td>{d.note}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-head">
           <h2>سجل المصاريف</h2>
@@ -162,7 +267,15 @@ export default function Expenses({ settings, role }: { settings: Settings | null
             <ExcelBar schema="expenses" title="المصاريف" buildRows={exportRows} onImportRows={canImport ? onImportRows : undefined} />
             <button
               onClick={() => {
-                setForm({ category: '', amount: '', note: '', date: today() })
+                setForm({
+                  category: '',
+                  amount: '',
+                  note: '',
+                  date: today(),
+                  is_recurring: false,
+                  recurrence: 'monthly',
+                  next_due: ''
+                })
                 setModal(true)
               }}
             >
@@ -224,7 +337,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 ))}
               </select>
             </Field>
-            <Field label="المبلغ (ل.ل أو $) *">
+            <Field label="المبلغ (ل.س أو $) *">
                 <CurrencyInput
                   dual
                   valueLbp={Number(form.amount) || 0}
@@ -236,6 +349,40 @@ export default function Expenses({ settings, role }: { settings: Settings | null
             <Field label="التاريخ">
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </Field>
+            <Field label="مصروف متكرر">
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={form.is_recurring}
+                  onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
+                />
+                يتكرر تلقائياً
+              </label>
+            </Field>
+            {form.is_recurring && (
+              <>
+                <Field label="الدورية">
+                  <select
+                    value={form.recurrence}
+                    onChange={(e) => setForm({ ...form, recurrence: e.target.value as Recurrence })}
+                  >
+                    {RECURRENCE_OPTIONS.map((r) => (
+                      <option key={r.value} value={r.value}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="أول استحقاق (اتركه فارغاً ليُحسب من التاريخ)">
+                  <input
+                    type="date"
+                    min={form.date}
+                    value={form.next_due}
+                    onChange={(e) => setForm({ ...form, next_due: e.target.value })}
+                  />
+                </Field>
+              </>
+            )}
             <Field label="الملاحظة">
               <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>
@@ -246,7 +393,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       {deleting && (
         <Confirm
           title="حذف مصروف"
-          message={`حذف المصروف "${deleting.category}" بمبلغ ${deleting.amount.toLocaleString('en-US')} ل.ل؟`}
+          message={`حذف المصروف "${deleting.category}" بمبلغ ${deleting.amount.toLocaleString('en-US')} ل.س؟`}
           onConfirm={remove}
           onClose={() => setDeleting(null)}
         />

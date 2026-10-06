@@ -4,7 +4,7 @@ import DataGrid from '../table'
 import type { Col } from '../table'
 import ExcelBar from '../excel'
 import type { CatalogItem, Material, Role, Settings } from '../lib'
-import { can, fmt } from '../lib'
+import { can, fmt, toLatinDigits } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 interface BomLine {
@@ -19,31 +19,38 @@ interface CatalogForm {
   lines: BomLine[]
 }
 
-const cols: Col<CatalogItem>[] = [
+const makeCols = (rate: number): Col<CatalogItem>[] => [
   { key: 'name', label: 'الاسم' },
   { key: 'price', label: 'السعر', type: 'money' },
   {
-    key: 'price_usd',
-    label: 'السعر ($)',
+    key: 'cost',
+    label: 'الكلفة (من المكونات)',
     type: 'display',
-    render: (c) => <span dir="ltr">{fmt(c.price_usd ?? 0)} $</span>
-  },
-  { key: 'cost', label: 'الكلفة (من المكونات)', type: 'display', render: (c) => `${fmt(c.cost)} ل.ل` },
-  {
-    key: 'cost_usd',
-    label: 'الكلفة ($)',
-    type: 'display',
-    render: (c) => <span dir="ltr">{fmt(c.cost_usd ?? 0)}$</span>
+    render: (c) => (
+      <div className="money-cell">
+        <div className="amount-lbp">{fmt(c.cost)} ل.س</div>
+        {rate > 0 && <div className="amount-usd">{(c.cost / rate).toFixed(2)} $</div>}
+      </div>
+    )
   },
   {
     key: 'margin',
     label: 'الهامش',
     type: 'display',
-    render: (c) => (
-      <span style={{ color: c.price - c.cost >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
-        {fmt(c.price - c.cost)} ل.ل
-      </span>
-    )
+    render: (c) => {
+      const m = c.price - c.cost
+      const color = m >= 0 ? 'var(--success)' : 'var(--danger)'
+      return (
+        <div className="money-cell">
+          <div style={{ color, fontWeight: 700 }}>{fmt(m)} ل.س</div>
+          {rate > 0 && (
+            <div className="amount-usd" style={{ color }}>
+              {(m / rate).toFixed(2)} $
+            </div>
+          )}
+        </div>
+      )
+    }
   },
   {
     key: 'bom',
@@ -68,6 +75,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
   const canEdit = can(role, 'edit') && can(role, 'editPrices')
   const canDelete = can(role, 'delete')
   const canImport = can(role, 'import')
+  const cols = useMemo(() => makeCols(rate), [rate])
 
   const load = useCallback(() => {
     window.clinic.catalog
@@ -250,7 +258,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
             <Field label="الاسم *">
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
             </Field>
-            <Field label="سعر الخدمة (ل.ل أو $)">
+            <Field label="سعر الخدمة (ل.س أو $)">
               <CurrencyInput
                 dual
                 valueLbp={Number(form.price) || 0}
@@ -281,14 +289,14 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
                     ))}
                   </select>
                   <input
-                    type="number"
+                    type="number" dir="ltr" inputMode="decimal"
                     min={1}
                     value={l.qty}
-                    onChange={(e) => setLine(i, { qty: Math.max(1, Number(e.target.value)) })}
+                    onChange={(e) => setLine(i, { qty: Math.max(1, Number(toLatinDigits(e.target.value)) || 1) })}
                     placeholder="الكمية"
                   />
                   <div className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>
-                    {m ? `${fmt(m.cost)} ل.ل ×${l.qty} = ${fmt(m.cost * l.qty)}` : '—'}
+                    {m ? `${fmt(m.cost)} ل.س ×${l.qty} = ${fmt(m.cost * l.qty)}` : '—'}
                   </div>
                   <button className="danger-ghost small" onClick={() => setForm((f) => ({ ...f, lines: f.lines.filter((_, j) => j !== i) }))}>
                     ✕
@@ -304,13 +312,13 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
           </div>
           <div className="flex between mt-16" style={{ fontWeight: 800 }}>
             <span>كلفة المكونات:</span>
-            <span>{fmt(bomCost)} ل.ل ({bomCost > 0 ? ((bomCost / (settings?.usd_rate || 130)).toFixed(2)) : '0.00'} $)</span>
+            <span>{fmt(bomCost)} ل.س ({bomCost > 0 ? ((bomCost / (settings?.usd_rate || 130)).toFixed(2)) : '0.00'} $)</span>
           </div>
           <div className="flex between mt-4" style={{ fontWeight: 800 }}>
             <span>الهامش المتوقع (السعر − الكلفة):</span>
             <span style={{ color: marginNum >= 0 ? 'var(--success)' : 'var(--danger)' }}>
               {marginNum >= 0 ? '+' : ''}
-              {fmt(marginNum)} ل.ل ({(marginNum / rate).toFixed(2)} $) — {(priceNum > 0 ? (marginNum / priceNum) * 100 : 0).toFixed(0)}%
+              {fmt(marginNum)} ل.س ({(marginNum / rate).toFixed(2)} $) — {(priceNum > 0 ? (marginNum / priceNum) * 100 : 0).toFixed(0)}%
             </span>
           </div>
           <div className="flex between mt-4" style={{ fontWeight: 800 }}>

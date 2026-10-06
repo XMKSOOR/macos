@@ -23,19 +23,19 @@ export interface SeedCatalog {
 
 // بيانات هجين (دراسة الجدوى — إصدار v2 المصحّح)
 // الأسعار بالليرة الجديدة (حُذف صفران من الليرة): القيمة = ليرة الدراسة ÷ 100
-// نسبة التحويل: 1$ = 13,000 ل.س قديمة = 130 ل.ل جديدة
+// نسبة التحويل: 1$ = 13,000 ل.س قديمة = 130 ل.س جديدة
 
 export const SEED_MATERIALS: SeedMaterial[] = [
-  // مستهلكات يومية (تكلفة التشخيص لكل حالة 0.83$ = 108 ل.ل جديدة)
+  // مستهلكات يومية (تكلفة التشخيص لكل حالة 0.83$ = 108 ل.س جديدة)
   { name: 'قفاز فحص نترايل (زوج)', category: 'مستهلكات', unit: 'زوج', quantity: 600, min_qty: 150, cost: 30, supplier: 'هجين (محلي)', notes: 'زوج واحد لكل حالة' },
   { name: 'قناع وجهي (كمامة)', category: 'مستهلكات', unit: 'حبة', quantity: 400, min_qty: 100, cost: 30, supplier: 'هجين (محلي)', notes: '' },
   { name: 'شفاطة بلع (Suction)', category: 'مستهلكات', unit: 'حبة', quantity: 200, min_qty: 50, cost: 18, supplier: 'هجين (محلي)', notes: '' },
   { name: 'قطن وشاش معقم', category: 'مستهلكات', unit: 'قطعة', quantity: 600, min_qty: 150, cost: 15, supplier: 'هجين (محلي)', notes: '' },
-  // تخدير موضعي (0.39$ = 51 ل.ل جديدة لكل حالة)
+  // تخدير موضعي (0.39$ = 51 ل.س جديدة لكل حالة)
   { name: 'بنج موضعي (كاربولة)', category: 'تخدير', unit: 'كاربولة', quantity: 300, min_qty: 60, cost: 25, supplier: 'هجين (محلي)', notes: '' },
   { name: 'إبرة تخدير', category: 'تخدير', unit: 'حبة', quantity: 300, min_qty: 60, cost: 18, supplier: 'هجين (محلي)', notes: '' },
   { name: 'جل تخدير موضعي', category: 'تخدير', unit: 'حبة', quantity: 150, min_qty: 30, cost: 8, supplier: 'هجين (محلي)', notes: '' },
-  // حشوات (كومبوزيت 0.47$ = 61 ل.ل / GIC 0.94$ = 122 ل.ل لكل حالة)
+  // حشوات (كومبوزيت 0.47$ = 61 ل.س / GIC 0.94$ = 122 ل.س لكل حالة)
   { name: 'حشوة كومبوزيت (جرعة)', category: 'حشوات', unit: 'جرعة', quantity: 200, min_qty: 40, cost: 41, supplier: 'دمشق', notes: 'مادة + سنّيّة' },
   { name: 'بوند وحمض إتش (جرعة)', category: 'حشوات', unit: 'جرعة', quantity: 200, min_qty: 40, cost: 20, supplier: 'دمشق', notes: '' },
   { name: 'حشوة زجاجية GIC (جرعة)', category: 'حشوات', unit: 'جرعة', quantity: 100, min_qty: 20, cost: 122, supplier: 'دمشق', notes: '' },

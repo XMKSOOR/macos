@@ -43,6 +43,7 @@ const TITLES: Record<ScreenKey, string> = {
 export default function App(): React.JSX.Element {
   const [user, setUser] = useState<User | null>(null)
   const [screen, setScreen] = useState<ScreenKey>('dashboard')
+  const [patientFileId, setPatientFileId] = useState<number | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const toast = useToast()
 
@@ -54,6 +55,11 @@ export default function App(): React.JSX.Element {
         if (u) setCurrentPerms(u.permissions ?? {})
       })
       .catch(() => setUser(null))
+  }, [])
+
+  const openPatient = useCallback((id: number): void => {
+    setPatientFileId(id)
+    setScreen('patients')
   }, [])
 
   const refreshUser = useCallback(() => {
@@ -141,10 +147,17 @@ export default function App(): React.JSX.Element {
           </div>
         </div>
         <div className="content">
-          {screen === 'dashboard' && <Dashboard settings={settings} />}
-          {screen === 'patients' && <Patients settings={settings} role={user.role} />}
-          {screen === 'appointments' && <Appointments role={user.role} />}
-          {screen === 'billing' && <Billing settings={settings} role={user.role} />}
+          {screen === 'dashboard' && <Dashboard settings={settings} onOpenPatient={openPatient} />}
+          {screen === 'patients' && (
+            <Patients
+              settings={settings}
+              role={user.role}
+              fileId={patientFileId}
+              onCloseFile={() => setPatientFileId(null)}
+            />
+          )}
+          {screen === 'appointments' && <Appointments role={user.role} onOpenPatient={openPatient} />}
+          {screen === 'billing' && <Billing settings={settings} role={user.role} onOpenPatient={openPatient} />}
           {screen === 'catalog' && <Catalog settings={settings} role={user.role} />}
           {screen === 'inventory' && <Inventory settings={settings} role={user.role} />}
           {screen === 'expenses' && <Expenses settings={settings} role={user.role} />}

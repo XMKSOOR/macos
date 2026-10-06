@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Confirm, CurrencyCell, Empty, Field, Modal, SearchBox, StatusBadge, useToast } from '../ui'
 import ExcelBar from '../excel'
 import type { CatalogItem, Invoice, Material, Patient, Role, Settings } from '../lib'
-import { can, fmt, today } from '../lib'
+import { can, fmt, today, toLatinDigits } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 interface Line {
@@ -16,7 +16,15 @@ interface Line {
 
 let lineKey = 1
 
-export default function Billing({ settings, role }: { settings: Settings | null; role: Role }): React.JSX.Element {
+export default function Billing({
+  settings,
+  role,
+  onOpenPatient
+}: {
+  settings: Settings | null
+  role: Role
+  onOpenPatient?: (id: number) => void
+}): React.JSX.Element {
   const [list, setList] = useState<Invoice[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -160,7 +168,15 @@ export default function Billing({ settings, role }: { settings: Settings | null;
                     return (
                       <tr key={inv.id}>
                         <td style={{ fontWeight: 700 }}>#{inv.invoice_no}</td>
-                        <td>{inv.patient_name}</td>
+                        <td>
+                          {inv.patient_id && onOpenPatient ? (
+                            <button className="link" onClick={() => onOpenPatient(inv.patient_id)}>
+                              {inv.patient_name}
+                            </button>
+                          ) : (
+                            inv.patient_name
+                          )}
+                        </td>
                         <td>{inv.date}</td>
                         <td>
                           <CurrencyCell lbp={inv.total} rate={inv.usd_rate || rate} />
@@ -285,7 +301,7 @@ function DetailBody({ invoice, rate }: { invoice: Invoice; rate: number }): Reac
         </div>
         <div>
           <div className="muted">سعر الصرف</div>
-          <div>{invoice.usd_rate} ل.ل/$</div>
+          <div>{invoice.usd_rate} ل.س/$</div>
         </div>
         <div>
           <div className="muted">أجرها</div>
@@ -422,11 +438,11 @@ function PayModal({
           </div>
         </div>
       </div>
-      <Field label="مبلغ الدفعة (ل.ل)">
-        <input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} autoFocus />
+      <Field label="مبلغ الدفعة (ل.س)">
+        <input type="number" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(Number(toLatinDigits(e.target.value)))} autoFocus />
       </Field>
       <p className="muted mt-8" style={{ fontSize: 12 }}>
-        بعد الدفعة يبقى: {(remaining - amount).toLocaleString('en-US')} ل.ل = {(((remaining - amount) / rate)).toFixed(2)} $
+        بعد الدفعة يبقى: {(remaining - amount).toLocaleString('en-US')} ل.س = {(((remaining - amount) / rate)).toFixed(2)} $
       </p>
     </Modal>
   )
@@ -563,11 +579,11 @@ function InvoiceEditor({
         <Field label="التاريخ">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <Field label="سعر الصرف ($ → ل.ل)">
-          <input type="number" value={usdRate} onChange={(e) => setUsdRate(Number(e.target.value))} />
+        <Field label="سعر الصرف ($ → ل.س)">
+          <input type="number" dir="ltr" inputMode="decimal" value={usdRate} onChange={(e) => setUsdRate(Number(toLatinDigits(e.target.value)))} />
         </Field>
-        <Field label="الخصم (ل.ل)">
-          <input type="number" value={discount} onChange={(e) => setDiscount(Number(e.target.value))} />
+        <Field label="الخصم (ل.س)">
+          <input type="number" dir="ltr" inputMode="decimal" value={discount} onChange={(e) => setDiscount(Number(toLatinDigits(e.target.value)))} />
         </Field>
       </div>
 
@@ -582,7 +598,7 @@ function InvoiceEditor({
           <option value="">+ إضافة من الكتالوج...</option>
           {catalog.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name} — {c.price.toLocaleString('en-US')} ل.ل
+              {c.name} — {c.price.toLocaleString('en-US')} ل.س
             </option>
           ))}
         </select>
@@ -595,7 +611,7 @@ function InvoiceEditor({
         <div className="series-title">
           <span>البيان</span>
           <span>الكمية</span>
-          <span>السعر (ل.ل أو $)</span>
+          <span>السعر (ل.س أو $)</span>
           <span>المجموع</span>
           <span>المواد المستهلكة</span>
           <span></span>
@@ -603,7 +619,7 @@ function InvoiceEditor({
         {lines.map((l) => (
           <div className="series-item" key={l.key}>
             <input value={l.name} onChange={(e) => updateLine(l.key, { name: e.target.value })} placeholder="اسم البند" />
-            <input className="qty-input" type="number" min={1} value={l.qty} onChange={(e) => updateLine(l.key, { qty: Math.max(1, Number(e.target.value)) })} />
+            <input className="qty-input" type="number" dir="ltr" inputMode="decimal" min={1} value={l.qty} onChange={(e) => updateLine(l.key, { qty: Math.max(1, Number(toLatinDigits(e.target.value)) || 1) })} />
             <CurrencyInput compact valueLbp={l.cost} rate={usdRate} onChange={(lbp) => updateLine(l.key, { cost: lbp })} placeholder="0" />
             <div className="amount-lbp">{fmt(l.cost * l.qty)}</div>
             <button className="soft small" onClick={() => setMatFor(l.key)}>
@@ -618,12 +634,12 @@ function InvoiceEditor({
 
       <div className="flex between mt-16" style={{ fontWeight: 800 }}>
         <span>المجموع قبل الخصم:</span>
-        <span>{fmt(subtotal)} ل.ل = {(subtotal / (usdRate || 1)).toFixed(2)} $</span>
+        <span>{fmt(subtotal)} ل.س = {(subtotal / (usdRate || 1)).toFixed(2)} $</span>
       </div>
       <div className="flex between mt-8" style={{ fontWeight: 800, fontSize: 17 }}>
         <span>الإجمالي:</span>
         <span>
-          {fmt(total)} ل.ل = {(total / (usdRate || 1)).toFixed(2)} $
+          {fmt(total)} ل.س = {(total / (usdRate || 1)).toFixed(2)} $
         </span>
       </div>
 
@@ -683,7 +699,7 @@ function MaterialPicker({
                 </option>
               ))}
             </select>
-            <input type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(e.target.value)))} style={{ width: 80 }} />
+            <input type="number" dir="ltr" inputMode="decimal" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(toLatinDigits(e.target.value)) || 1))} style={{ width: 80 }} />
             <button className="ghost" onClick={add}>
               إضافة
             </button>

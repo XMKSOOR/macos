@@ -8,7 +8,7 @@ interface CurrencyInputProps {
   placeholder?: string
   disabled?: boolean
   compact?: boolean
-  /** وضع مزدوج: حقلا ل.ل و $ جنباً إلى جنب يتفاعلان معاً */
+  /** وضع مزدوج: حقلا ل.س و $ جنباً إلى جنب يتفاعلان معاً */
   dual?: boolean
 }
 
@@ -35,7 +35,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
     const shown = draft !== null ? draft : lbp ? (unit === 'usd' ? fmtUsd(lbp / r) : fmtLbp(lbp)) : ''
     const hint = lbp
       ? unit === 'usd'
-        ? `≈ ${fmtLbp(lbp)} ل.ل`
+        ? `≈ ${fmtLbp(lbp)} ل.س`
         : `≈ ${fmtUsd(lbp / r)} $`
       : ''
 
@@ -71,7 +71,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
           />
           <div className="unit-toggle" role="group">
             <button type="button" className={unit === 'lbp' ? 'on' : ''} onClick={() => switchUnit('lbp')} disabled={disabled} title="بالليرة">
-              ل.ل
+              ل.س
             </button>
             <button type="button" className={unit === 'usd' ? 'on' : ''} onClick={() => switchUnit('usd')} disabled={disabled} title="بالدولار">
               $
@@ -130,7 +130,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
               setDraftL(null)
             }}
           />
-          <span className="dual-unit">ل.ل</span>
+          <span className="dual-unit">ل.س</span>
         </label>
         <span className="dual-arrow">{'⟷'}</span>
         <label className="dual-field">
@@ -158,7 +158,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
       </div>
       {!compact ? (
         <div className="minor-hint">
-          {lbp > 0 ? `التحويل الحي: ${fmtLbp(lbp)} ل.ل = ${fmtUsd(lbp / r)} $` : `سعر الصرف المستخدم: 1$ = ${fmtLbp(r)} ل.ل — أكتب في أي حقل ويتحدّث الآخر`}
+          {lbp > 0 ? `التحويل الحي: ${fmtLbp(lbp)} ل.س = ${fmtUsd(lbp / r)} $` : `سعر الصرف المستخدم: 1$ = ${fmtLbp(r)} ل.س — أكتب في أي حقل ويتحدّث الآخر`}
         </div>
       ) : null}
     </div>

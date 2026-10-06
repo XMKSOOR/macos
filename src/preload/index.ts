@@ -3,10 +3,18 @@ import type {
   Appointment,
   CatalogItem,
   DashboardStats,
+  DueRecurringExpense,
   Expense,
   Invoice,
   Material,
+  Medication,
+  MedicationInput,
+  Medicine,
+  MedicineInput,
   Patient,
+  PatientAttachment,
+  PatientFileResult,
+  PatientReportMode,
   PrinterInfo,
   Settings,
   SheetExportRequest,
@@ -43,11 +51,31 @@ const api = {
   },
   patients: {
     list: (search?: string): Promise<Patient[]> => invoke('patients:list', { search }),
+    get: (id: number): Promise<PatientFileResult> => invoke('patients:get', { id }),
     create: (p: object): Promise<Patient> => invoke('patients:create', p),
     update: (id: number, data: object): Promise<boolean> => invoke('patients:update', { id, data }),
     delete: (id: number): Promise<boolean> => invoke('patients:delete', { id }),
     importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
       invoke('patients:import', { rows })
+  },
+  attachments: {
+    list: (patientId: number): Promise<PatientAttachment[]> => invoke('attachments:list', { patientId }),
+    add: (patientId: number): Promise<PatientAttachment[]> => invoke('attachments:add', { patientId }),
+    read: (id: number): Promise<{ attachment: PatientAttachment; dataUrl: string }> =>
+      invoke('attachments:read', { id }),
+    delete: (id: number): Promise<boolean> => invoke('attachments:delete', { id }),
+    openExternal: (id: number): Promise<boolean> => invoke('attachments:openExternal', { id })
+  },
+  medications: {
+    list: (patientId: number): Promise<Medication[]> => invoke('medications:list', { patientId }),
+    save: (m: MedicationInput & { id?: number }): Promise<Medication> => invoke('medications:save', m),
+    delete: (id: number): Promise<boolean> => invoke('medications:delete', { id })
+  },
+  medCatalog: {
+    list: (): Promise<Medicine[]> => invoke('medCatalog:list'),
+    create: (m: MedicineInput): Promise<Medicine> => invoke('medCatalog:create', m),
+    update: (id: number, data: MedicineInput): Promise<Medicine> => invoke('medCatalog:update', { id, data }),
+    delete: (id: number): Promise<boolean> => invoke('medCatalog:delete', { id })
   },
   appointments: {
     list: (filter?: object): Promise<Appointment[]> => invoke('appointments:list', filter ?? {}),
@@ -87,14 +115,20 @@ const api = {
     list: (filter?: object): Promise<Expense[]> => invoke('expenses:list', filter ?? {}),
     create: (e: object): Promise<Expense> => invoke('expenses:create', e),
     update: (id: number, data: object): Promise<boolean> => invoke('expenses:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('expenses:delete', { id })
+    delete: (id: number): Promise<boolean> => invoke('expenses:delete', { id }),
+    due: (withinDays?: number): Promise<DueRecurringExpense[]> => invoke('expenses:due', { withinDays }),
+    runDue: (): Promise<number> => invoke('expenses:runDue')
   },
   dashboard: {
     stats: (period: string): Promise<DashboardStats> => invoke('dashboard:stats', { period })
   },
   printing: {
     list: (): Promise<PrinterInfo[]> => invoke('printing:list'),
-    receipt: (invoiceId: number): Promise<{ ok: boolean; error?: string }> => invoke('printing:receipt', { invoiceId })
+    receipt: (invoiceId: number): Promise<{ ok: boolean; error?: string }> => invoke('printing:receipt', { invoiceId }),
+    patientReport: (patientId: number, mode: PatientReportMode): Promise<{ ok: boolean; error?: string }> =>
+      invoke('printing:patientReport', { patientId, mode }),
+    prescription: (req: { patientId: number; medicationIds: number[]; diagnosis?: string; note?: string }): Promise<{ ok: boolean; error?: string }> =>
+      invoke('printing:prescription', req)
   },
   files: {
     export: (req: SheetExportRequest): Promise<string | null> => invoke('files:export', req),
@@ -122,6 +156,12 @@ const api = {
     push: (): Promise<string> => invoke('mysql:push'),
     pull: (): Promise<string> => invoke('mysql:pull'),
     config: (): Promise<boolean> => invoke('mysql:config')
+  },
+  supabase: {
+    test: (): Promise<string> => invoke('supabase:test'),
+    push: (): Promise<string> => invoke('supabase:push'),
+    pull: (): Promise<string> => invoke('supabase:pull'),
+    config: (): Promise<boolean> => invoke('supabase:config')
   }
 }
 

@@ -12,9 +12,15 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
-    "dist": "electron-vite build && electron-builder"
+    "dist": "electron-vite build && electron-builder",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:mac": "electron-vite build && electron-builder --mac"
   },
   "dependencies": {
+    "@supabase/storage-js": "^2.117.2",
+    "@supabase/supabase-js": "^2.117.2",
+    "dicom-parser": "^1.8.21",
+    "dotenv": "^18.0.5",
     "mysql2": "^3.24.4",
     "node-sqlite3-wasm": "^0.8.60",
     "react": "^19.3.0",

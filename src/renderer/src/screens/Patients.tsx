@@ -5,6 +5,7 @@ import type { Col } from '../table'
 import ExcelBar from '../excel'
 import type { Patient, Role, Settings } from '../lib'
 import { can, toLatinDigits, today } from '../lib'
+import PatientFile from './PatientFile'
 
 const empty: Omit<Patient, 'id' | 'created_at'> = {
   name: '',
@@ -24,17 +25,30 @@ const cols: Col<Patient>[] = [
   { key: 'notes', label: 'ملاحظات' }
 ]
 
-export default function Patients({ settings, role }: { settings: Settings | null; role: Role }): React.JSX.Element {
+export default function Patients({
+  settings,
+  role,
+  fileId,
+  onCloseFile
+}: {
+  settings: Settings | null
+  role: Role
+  fileId?: number | null
+  onCloseFile?: () => void
+}): React.JSX.Element {
   const [list, setList] = useState<Patient[]>([])
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(empty)
   const [deleting, setDeleting] = useState<Patient | null>(null)
+  const [fileOf, setFileOf] = useState<number | null>(null)
   const toast = useToast()
 
   const canEdit = can(role, 'edit')
   const canDelete = can(role, 'delete')
   const canImport = can(role, 'import')
+
+  const activeFile = fileId ?? fileOf ?? null
 
   const load = useCallback(
     (term?: string) => {
@@ -127,16 +141,20 @@ export default function Patients({ settings, role }: { settings: Settings | null
             rowKey={(p) => p.id}
             canEdit={canEdit}
             onSave={onRowSave}
+            onRowDoubleClick={(p) => setFileOf(p.id)}
             emptyText="لا يوجد مرضى"
-            actions={(p) =>
-              canDelete ? (
-                <button className="danger-ghost small" onClick={() => setDeleting(p)}>
-                  حذف
+            actions={(p) => (
+              <div className="actions-cell">
+                <button className="small" onClick={() => setFileOf(p.id)}>
+                  الملف
                 </button>
-              ) : (
-                <span />
-              )
-            }
+                {canDelete && (
+                  <button className="danger-ghost small" onClick={() => setDeleting(p)}>
+                    حذف
+                  </button>
+                )}
+              </div>
+            )}
           />
         </div>
       </div>
@@ -179,6 +197,17 @@ export default function Patients({ settings, role }: { settings: Settings | null
             </Field>
           </div>
         </Modal>
+      )}
+
+      {activeFile !== null && (
+        <PatientFile
+          id={activeFile}
+          rate={settings?.usd_rate ?? 130}
+          onClose={() => {
+            setFileOf(null)
+            onCloseFile?.()
+          }}
+        />
       )}
 
       {deleting && (

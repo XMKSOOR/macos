@@ -22,8 +22,10 @@ interface DataGridProps<T> {
   toolbar?: ReactNode
   emptyText?: string
   className?: string
-  /** سعر الصرف (ل.ل لكل $) لتفعيل التعديل المباشر المزدوج في الخانات المالية ل.ل/$ */
+  /** سعر الصرف (ل.س لكل $) لتفعيل التعديل المباشر المزدوج في الخانات المالية ل.س/$ */
   moneyRate?: number
+  /** عند تزويده، يتجاوز النقر المزدوج الافتراضي (التعديل المباشر) ويستدعي هذا الإجراء */
+  onRowDoubleClick?: (row: T) => void
 }
 
 function parseCellValue(col: Col<unknown>, v: unknown): unknown {
@@ -42,7 +44,8 @@ export default function DataGrid<T>({
   toolbar,
   emptyText,
   className,
-  moneyRate
+  moneyRate,
+  onRowDoubleClick
 }: DataGridProps<T>): React.JSX.Element {
   const [editKey, setEditKey] = useState<number | string | null>(null)
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -95,7 +98,16 @@ export default function DataGrid<T>({
     const value = raw === null || raw === undefined ? '' : String(raw)
     if (editKey !== rowKey(row)) {
       const n = Number(raw)
-      if (col.type === 'money') return <span className="amount-lbp">{Number.isFinite(n) ? `${fmt(n)} ل.ل` : '—'}</span>
+      if (col.type === 'money') {
+        if (!Number.isFinite(n)) return <span className="amount-lbp">—</span>
+        const r = moneyRate ?? 0
+        return (
+          <div className="money-cell">
+            <div className="amount-lbp">{fmt(n)} ل.س</div>
+            {r > 0 && <div className="amount-usd">{(n / r).toFixed(2)} $</div>}
+          </div>
+        )
+      }
       if (col.type === 'number') return <span>{Number.isFinite(n) ? fmt(n) : '—'}</span>
       return value || '—'
     }
@@ -127,7 +139,7 @@ export default function DataGrid<T>({
                 }}
                 autoFocus
               />
-              <span className="dual-unit">ل.ل</span>
+              <span className="dual-unit">ل.س</span>
               <span className="dual-arrow">{'⟷'}</span>
               <input
                 type="number"
@@ -151,7 +163,7 @@ export default function DataGrid<T>({
         }
         return (
           <input
-            type="number"
+            type="number" dir="ltr" inputMode="decimal"
             className="inline-input"
             value={draft[col.key] ?? ''}
             onChange={(e) => setDraft({ ...draft, [col.key]: toLatinDigits(e.target.value) })}
@@ -236,8 +248,17 @@ export default function DataGrid<T>({
           ) : (
             rows.map((row) => {
               const editing = editKey === rowKey(row)
+              const handleDoubleClick = (row: T): void => {
+                if (onRowDoubleClick) onRowDoubleClick(row)
+                else startEdit(row)
+              }
+              const rowTitle = onRowDoubleClick
+                ? 'انقر نقراً مزدوجاً لفتح الملف'
+                : canEdit
+                  ? 'انقر نقراً مزدوجاً للتعديل المباشر'
+                  : undefined
               return (
-                <tr key={String(rowKey(row))} className={editing ? 'editable-row' : ''} onDoubleClick={() => startEdit(row)} title={canEdit ? 'انقر نقراً مزدوجاً للتعديل المباشر' : undefined}>
+                <tr key={String(rowKey(row))} className={editing ? 'editable-row' : ''} onDoubleClick={() => handleDoubleClick(row)} title={rowTitle}>
                   {cols.map((c) => (
                     <td key={c.key}>
                       {editing && editableKeys.includes(c.key) ? cellContent(row, c) : cellContent(row, c)}

@@ -19,8 +19,83 @@ export interface Patient {
   gender: string
   address: string
   notes: string
+  /** رقم الملف الطبي أو الرقم الوطني الموحد */
+  national_id?: string
+  /** الحساسية الدوائية والغذائية */
+  allergies?: string
+  /** الأمراض المزمنة */
+  chronic_diseases?: string
+  /** الحالة الفسيولوجية الخاصة (حمل، رضاعة...) */
+  physiological_status?: string
+  /** ملاحظات وتاريخ مرضي إضافي */
+  medical_notes?: string
   created_at: string
 }
+
+export type MedicationCategory = 'prescription' | 'otc' | 'supplement' | 'herbal'
+
+/** سجل أدوية المريض: الأدوية الحرة والموصوفة والمكملات */
+export interface Medication {
+  id: number
+  patient_id: number
+  /** الاسم العلمي (المادة الفعالة) */
+  scientific_name: string
+  /** الاسم التجاري (المطبوع على العلبة) */
+  trade_name: string
+  /** الجرعة/التركيز (مثال: 500 ملغ) */
+  dose: string
+  /** الشكل الصيدلاني (أقراص، شراب، حقن...) */
+  form: string
+  /** طريقة الاستخدام (فموي، تحت اللسان...) */
+  route: string
+  /** عدد المرات والتوقيت (ثلاث مرات يومياً...) */
+  frequency: string
+  start_date: string
+  end_date: string
+  /** التصنيف: موصوف، بدون وصفة OTC، مكمل غذائي، أعشاب */
+  category: MedicationCategory
+  /** اسم الطبيب المعالج وتخصصه */
+  prescriber: string
+  prescriber_specialty: string
+  /** اسم الصيدلي */
+  pharmacist: string
+  /** تاريخ الصرف ومكان الصرف */
+  dispense_date: string
+  dispense_place: string
+  /** تاريخ المراجعة القادمة */
+  next_review: string
+  notes: string
+  /** 1 إن كان الدواء الحالي فعّالاً */
+  active: number
+  created_at: string
+}
+
+export type MedicationInput = Omit<Medication, 'id' | 'created_at'>
+
+/** دواء في القائمة المرجعية (تعبئة سريعة للوصفة) */
+export interface Medicine {
+  id: number
+  trade_name: string
+  scientific_name: string
+  dose: string
+  form: string
+  route: string
+  frequency: string
+  category: MedicationCategory
+  created_at: string
+}
+
+export type MedicineInput = Omit<Medicine, 'id' | 'created_at'>
+
+/** وصفة طبية جاهزة للطباعة */
+export interface PrescriptionRequest {
+  patientId: number
+  medicationIds: number[]
+  diagnosis?: string
+  note?: string
+}
+
+export type PatientReportMode = 'brief' | 'full'
 
 export interface Appointment {
   id: number
@@ -95,6 +170,29 @@ export interface InvoiceItem extends InvoiceItemInput {
 
 export type InvoiceStatus = 'unpaid' | 'partial' | 'paid'
 
+/** مرفق محلي (صورة، صورة أشعة/DICOM، أو ملف) يخصّ مريضاً */
+export interface PatientAttachment {
+  id: number
+  patient_id: number
+  /** الاسم الأصلي للملف كما اختاره المستخدم */
+  filename: string
+  /** اسم الملف على القرص داخل مجلد بيانات التطبيق */
+  stored_name: string
+  /** نوع المحتوى: صورة أشعة DICOM، صورة عادية، أو ملف آخر */
+  ftype: 'dicom' | 'image' | 'other'
+  mime: string
+  size: number
+  created_at: string
+}
+
+export interface PatientFileResult {
+  patient: Patient
+  appointments: Appointment[]
+  invoices: Invoice[]
+  attachments: PatientAttachment[]
+  medications: Medication[]
+}
+
 export interface Invoice {
   id: number
   invoice_no: string
@@ -120,6 +218,8 @@ export interface Invoice {
   items_cost?: number
 }
 
+export type Recurrence = 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+
 export interface Expense {
   id: number
   category: string
@@ -129,6 +229,21 @@ export interface Expense {
   date: string
   created_by: string
   created_at: string
+  is_recurring?: number
+  recurrence?: Recurrence
+  next_due?: string
+  last_generated?: string
+}
+
+/** مصروف متكرر يستحق خلال الأيام القادمة */
+export interface DueRecurringExpense {
+  id: number
+  category: string
+  amount: number
+  note: string
+  recurrence: Recurrence
+  next_due: string
+  days_left: number
 }
 
 export interface Settings {
@@ -151,6 +266,9 @@ export interface Settings {
   mysql_user: string
   mysql_secret: string
   mysql_auto: string
+  supabase_url: string
+  supabase_key: string
+  supabase_auto: string
   feasibility_seed: string
   feasibility_plan?: string
   feasibility_seed2?: string
@@ -264,7 +382,7 @@ export const SHEET_SCHEMAS: SheetSchema[] = [
     importable: true,
     cols: [
       { key: 'name', header: 'الاسم', sample: 'حشوة تجميلية', aliases: ['name', 'اسم الصنف', 'اسم الخدمة', 'اسم البند'] },
-      { key: 'price', header: 'السعر (ل.ل)', sample: '2000000', aliases: ['price', 'price_lbp', 'السعر', 'سعر', 'سعر الخدمة ب الليرة'] },
+      { key: 'price', header: 'السعر (ل.س)', sample: '2000000', aliases: ['price', 'price_lbp', 'السعر', 'سعر', 'سعر الخدمة ب الليرة'] },
       { key: 'price', header: 'السعر ($)', sample: '200', usd: true, aliases: ['price_usd', 'price_$', 'price ($)', 'سعر الدولار', 'السعر بالدولار'] },
       { key: 'description', header: 'الوصف', sample: '', aliases: ['description', 'وصف', 'عن'] }
     ]
@@ -279,7 +397,7 @@ export const SHEET_SCHEMAS: SheetSchema[] = [
       { key: 'unit', header: 'الوحدة', sample: 'علبة', aliases: ['unit', 'وحدة'] },
       { key: 'quantity', header: 'الكمية', sample: '100', aliases: ['quantity', 'qty', 'الكمية الفعلية'] },
       { key: 'min_qty', header: 'الحد الأدنى', sample: '20', aliases: ['min_qty', 'min', 'الحد الادنى'] },
-      { key: 'cost', header: 'الكلفة (ل.ل)', sample: '150000', aliases: ['cost', 'cost_lbp', 'الكلفة', 'التكلفة', 'سعر الشراء'] },
+      { key: 'cost', header: 'الكلفة (ل.س)', sample: '150000', aliases: ['cost', 'cost_lbp', 'الكلفة', 'التكلفة', 'سعر الشراء'] },
       { key: 'cost', header: 'الكلفة ($)', sample: '150', usd: true, aliases: ['cost_usd', 'cost_$', 'cost ($)', 'كلفة الدولار', 'سعر الشراء بالدولار'] },
       { key: 'supplier', header: 'المورد', sample: '', aliases: ['supplier', 'المورد', 'مورد'] },
       { key: 'notes', header: 'ملاحظات', sample: '', aliases: ['notes', 'ملاحظة'] }
@@ -291,7 +409,7 @@ export const SHEET_SCHEMAS: SheetSchema[] = [
     importable: true,
     cols: [
       { key: 'category', header: 'التصنيف', sample: 'إيجار', aliases: ['category', 'نوع المصروف', 'النوع'] },
-      { key: 'amount', header: 'المبلغ (ل.ل)', sample: '5000000', aliases: ['amount', 'amount_lbp', 'المبلغ', 'القيمة'] },
+      { key: 'amount', header: 'المبلغ (ل.س)', sample: '5000000', aliases: ['amount', 'amount_lbp', 'المبلغ', 'القيمة'] },
       { key: 'amount', header: 'المبلغ ($)', sample: '5000', usd: true, aliases: ['amount_usd', 'amount_$', 'amount ($)', 'المبلغ بالدولار'] },
       { key: 'date', header: 'التاريخ', sample: '2026-09-11', aliases: ['date', 'اليوم'] },
       { key: 'note', header: 'الملاحظة', sample: '', aliases: ['note', 'notes', 'ملاحظات'] }

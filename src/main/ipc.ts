@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import { BrowserWindow } from 'electron'
 import {
   addPayment,
+  addPatientFile,
   adjustStock,
   createAppointment,
   createCatalogItem,
@@ -17,19 +18,34 @@ import {
   deleteInvoice,
   deleteMaterial,
   deletePatient,
+  deletePatientFile,
   deleteUser,
   findLogin,
   getInvoice,
   getSettings,
   importCatalogRows,
   importMaterials,
+  getPatientFile,
+  getPatientFileRecord,
+  attachmentPath,
+  listPatientFiles,
+  readPatientFile,
   importPatients,
+  listDueRecurringExpenses,
+  materializeDueRecurringExpenses,
   listAppointments,
   listCatalog,
   listExpenses,
   listInvoices,
   listInvoicesSince,
   listMaterials,
+  listMedications,
+  saveMedication,
+  deleteMedication,
+  listMedicines,
+  createMedicine,
+  updateMedicine,
+  deleteMedicine,
   listPatients,
   listStockMovements,
   listUsers,
@@ -52,10 +68,23 @@ import {
   driveSyncOnQuit,
   driveUpload
 } from './sync'
-import type { PermissionKey, PrinterInfo, Settings, SheetExportRequest, SheetSchemaKey, User } from '../shared/types'
+import type {
+  Medication,
+  MedicationInput,
+  MedicineInput,
+  PrescriptionRequest,
+  PatientReportMode,
+  PermissionKey,
+  PrinterInfo,
+  Settings,
+  SheetExportRequest,
+  SheetSchemaKey,
+  User
+} from '../shared/types'
 import { can } from '../shared/types'
 import { applyCurrencyScale, backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
 import { mysqlConfig, mysqlPull, mysqlPush, mysqlTest } from './mysql'
+import { supabaseConfig, supabasePull, supabasePush, supabaseTest } from './supabase'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
 
@@ -73,6 +102,7 @@ export function registerIpc(ipc: IpcMain): void {
       try {
         return { ok: true, data: await fn(args) }
       } catch (e) {
+        if (process.env['IPC_TRACE']) console.error('IPC_ERR ' + channel + ' :: ' + (e instanceof Error ? (e.stack ?? e.message) : String(e)))
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
     })
@@ -191,6 +221,84 @@ export function registerIpc(ipc: IpcMain): void {
   handle('patients:import', (args) => {
     requireAuth('import')
     return importPatients((args as { rows: Record<string, string>[] }).rows)
+  })
+  handle('patients:get', (args) => {
+    requireAuth()
+    return getPatientFile((args as { id: number }).id)
+  })
+
+  // ---- سجل أدوية المريض ----
+  handle('medications:list', (args) => {
+    requireAuth()
+    return listMedications((args as { patientId: number }).patientId)
+  })
+  handle('medications:save', (args) => {
+    requireAuth('edit')
+    return saveMedication(args as MedicationInput & { id?: number })
+  })
+  handle('medications:delete', (args) => {
+    requireAuth('edit')
+    deleteMedication((args as { id: number }).id)
+    return true
+  })
+
+  // ---- القائمة المرجعية للأدوية ----
+  handle('medCatalog:list', () => {
+    requireAuth()
+    return listMedicines()
+  })
+  handle('medCatalog:create', (args) => {
+    requireAuth('edit')
+    return createMedicine(args as MedicineInput)
+  })
+  handle('medCatalog:update', (args) => {
+    requireAuth('edit')
+    const { id, data } = args as { id: number; data: MedicineInput }
+    return updateMedicine(id, data)
+  })
+  handle('medCatalog:delete', (args) => {
+    requireAuth('edit')
+    deleteMedicine((args as { id: number }).id)
+    return true
+  })
+
+  // ---- مرفقات المريض: صور، صور أشعة DICOM، ملفات (تُحفَظ محلياً فقط) ----
+  handle('attachments:list', (args) => {
+    requireAuth()
+    return listPatientFiles((args as { patientId: number }).patientId)
+  })
+  handle('attachments:add', async (args) => {
+    requireAuth('edit')
+    const { patientId } = args as { patientId: number }
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'اختر صور الأشعة أو الصور أو ملفات المريض',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: 'صور الأشعة والصور (DICOM / JPG / PNG)',
+          extensions: ['dcm', 'dicom', 'dcmdir', 'ima', 'png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'tif', 'tiff']
+        },
+        { name: 'كل الملفات', extensions: ['*'] }
+      ]
+    })
+    if (canceled || filePaths.length === 0) return []
+    return filePaths.map((p) => addPatientFile(patientId, p))
+  })
+  handle('attachments:read', (args) => {
+    requireAuth()
+    return readPatientFile((args as { id: number }).id)
+  })
+  handle('attachments:delete', (args) => {
+    requireAuth('edit')
+    deletePatientFile((args as { id: number }).id)
+    return true
+  })
+  handle('attachments:openExternal', async (args) => {
+    requireAuth()
+    const row = getPatientFileRecord((args as { id: number }).id)
+    const err = await shell.openPath(attachmentPath(row))
+    if (err) throw new Error(err)
+    return true
   })
 
   // ---- Appointments ----
@@ -314,6 +422,14 @@ export function registerIpc(ipc: IpcMain): void {
     deleteExpense((args as { id: number }).id)
     return true
   })
+  handle('expenses:due', (args) => {
+    requireAuth()
+    return listDueRecurringExpenses((args as { withinDays?: number } | undefined)?.withinDays ?? 7)
+  })
+  handle('expenses:runDue', () => {
+    requireAuth('edit')
+    return materializeDueRecurringExpenses()
+  })
 
   // ---- Dashboard ----
   handle('dashboard:stats', (args) => dashboardStats((args as { period: string } | undefined)?.period ?? '7'))
@@ -336,6 +452,25 @@ export function registerIpc(ipc: IpcMain): void {
     const settings = getSettings()
     const html = buildReceiptHtml(invoice, settings)
     return printHtml(html, settings.printer_name || undefined)
+  })
+
+  handle('printing:patientReport', async (args) => {
+    const { patientId, mode } = args as { patientId: number; mode: PatientReportMode }
+    const file = getPatientFile(patientId)
+    const settings = getSettings()
+    const html = buildPatientReportHtml(file, settings, mode === 'brief' ? 'brief' : 'full')
+    return printHtml(html, settings.printer_name || undefined, 'A4')
+  })
+
+  handle('printing:prescription', async (args) => {
+    const req = args as PrescriptionRequest
+    const file = getPatientFile(req.patientId)
+    if (!file) throw new Error('المريض غير موجود')
+    const settings = getSettings()
+    const ids = Array.isArray(req.medicationIds) ? req.medicationIds : []
+    const meds = (file.medications ?? []).filter((m) => ids.includes(m.id))
+    const html = buildPrescriptionHtml(file, settings, meds, req.diagnosis ?? '', req.note ?? '')
+    return printHtml(html, settings.printer_name || undefined, 'A5')
   })
 
   // ---- Excel export / import / template ----
@@ -452,6 +587,21 @@ export function registerIpc(ipc: IpcMain): void {
     return mysqlPull()
   })
   handle('mysql:config', () => !!mysqlConfig())
+
+  // ---- Supabase Storage sync ----
+  handle('supabase:test', async () => {
+    requireAuth('manageSettings')
+    return supabaseTest()
+  })
+  handle('supabase:push', async () => {
+    requireAuth('manageSettings')
+    return supabasePush()
+  })
+  handle('supabase:pull', async () => {
+    requireAuth('manageSettings')
+    return supabasePull()
+  })
+  handle('supabase:config', () => !!supabaseConfig())
 }
 
 function buildReceiptHtml(
@@ -507,7 +657,282 @@ ${items
 </body></html>`
 }
 
-function printHtml(html: string, printerName?: string): Promise<{ ok: boolean; error?: string }> {
+function buildPatientReportHtml(
+  file: NonNullable<ReturnType<typeof getPatientFile>>,
+  settings: Settings,
+  mode: PatientReportMode
+): string {
+  const esc = escapeHtml
+  const p = file.patient
+  const fmt = (n: number): string => n.toLocaleString('en-US')
+  const meds = file.medications ?? []
+  const activeMeds = meds.filter((m) => m.active)
+  const appts = file.appointments ?? []
+  const invoices = file.invoices ?? []
+  const full = mode === 'full'
+  const today = new Date().toLocaleDateString('en-GB')
+
+  const age = ((): string => {
+    if (!p.birth_date) return ''
+    const b = new Date(p.birth_date)
+    if (isNaN(b.getTime())) return ''
+    const now = new Date()
+    let a = now.getFullYear() - b.getFullYear()
+    const md = now.getMonth() - b.getMonth()
+    if (md < 0 || (md === 0 && now.getDate() < b.getDate())) a--
+    return a >= 0 ? `${a} سنة` : ''
+  })()
+
+  const infoRow = (k: string, v: string): string =>
+    v ? `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>` : ''
+
+  const medRow = (m: (typeof meds)[number]): string => {
+    const catLabel =
+      m.category === 'otc'
+        ? 'بدون وصفة (OTC)'
+        : m.category === 'supplement'
+          ? 'مكمل غذائي'
+          : m.category === 'herbal'
+            ? 'أعشاب/طبيعي'
+            : 'موصوف'
+    const period = [m.start_date, m.end_date].filter(Boolean).join(' ← ')
+    return `<tr>
+      <td>${esc(m.trade_name || m.scientific_name || '—')}${m.scientific_name && m.trade_name ? `<br><span class="sub">${esc(m.scientific_name)}</span>` : ''}</td>
+      <td>${esc(m.dose)}</td>
+      <td>${esc(m.form)}</td>
+      <td>${esc(m.route)}</td>
+      <td>${esc(m.frequency)}</td>
+      <td>${esc(period)}</td>
+      <td>${esc(catLabel)}</td>
+      <td>${m.active ? 'فعّال' : 'متوقف'}</td>
+    </tr>`
+  }
+
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<style>
+@page { margin: 14mm; size: A4; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 12px; color: #111; line-height: 1.5; }
+h1 { font-size: 18px; margin: 0 0 2px; text-align: center; }
+h2 { font-size: 14px; margin: 14px 0 6px; padding: 4px 8px; background: #eef2f7; border-right: 4px solid #0e7c66; }
+.head { text-align: center; border-bottom: 2px solid #111; padding-bottom: 6px; margin-bottom: 8px; }
+.meta { font-size: 11px; color: #444; white-space: pre-wrap; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+th, td { border: 1px solid #cbd5e1; padding: 4px 6px; text-align: right; vertical-align: top; }
+th { background: #f1f5f9; width: 32%; }
+table.data th { width: auto; background: #f1f5f9; }
+.sub { color: #64748b; font-size: 10px; }
+.box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.alert { border: 1px solid #fca5a5; background: #fef2f2; }
+.alert b { color: #b91c1c; }
+.sign { margin-top: 26px; display: flex; justify-content: space-between; font-size: 11px; }
+.sign div { border-top: 1px solid #111; padding-top: 4px; width: 45%; text-align: center; }
+.muted { color: #64748b; }
+</style></head><body>
+<div class="head">
+  <h1>${esc(settings.clinic_name)}</h1>
+  <div class="meta">${esc(settings.clinic_phone)}${settings.clinic_address ? ' — ' + esc(settings.clinic_address) : ''}</div>
+  <div class="meta">${full ? 'السجل الطبي الكامل' : 'كشف مختصر'} — تاريخ الطباعة: ${today}</div>
+</div>
+
+<h2>1. البيانات الشخصية والأساسية</h2>
+<table>
+  ${infoRow('الاسم الكامل', p.name)}
+  ${infoRow('تاريخ الميلاد', p.birth_date ? `${p.birth_date}${age ? ' (' + age + ')' : ''}` : '')}
+  ${infoRow('رقم الملف الطبي / الوطني', p.national_id ?? '')}
+  ${infoRow('الجنس', p.gender)}
+  ${infoRow('رقم الهاتف', p.phone)}
+  ${infoRow('العنوان', p.address)}
+</table>
+
+<h2>2. التاريخ المرضي والمحاذير الطبية</h2>
+<div class="box alert"><b>الحساسية الدوائية والغذائية:</b> ${esc(p.allergies || 'لا يوجد')}</div>
+<table>
+  ${infoRow('الأمراض المزمنة', p.chronic_diseases ?? '')}
+  ${infoRow('الحالة الفسيولوجية الخاصة', p.physiological_status ?? '')}
+  ${full ? infoRow('ملاحظات وتاريخ مرضي إضافي', p.medical_notes ?? '') : ''}
+  ${infoRow('ملاحظات عامة', p.notes)}
+</table>
+
+<h2>3. تفاصيل الأدوية الحالية${full ? ' والسجل الكامل' : ''}</h2>
+${
+  (full ? meds : activeMeds).length === 0
+    ? `<div class="box muted">لا توجد أدوية مسجّلة</div>`
+    : `<table class="data">
+  <tr><th>الاسم التجاري / العلمي</th><th>الجرعة</th><th>الشكل</th><th>الطريقة</th><th>عدد المرات والتوقيت</th><th>تاريخ البدء ← الانتهاء</th><th>التصنيف</th><th>الحالة</th></tr>
+  ${(full ? meds : activeMeds).map(medRow).join('')}
+</table>`
+}
+
+${
+  full
+    ? `<h2>4. تفاصيل الوصفة والجهة المصدرة</h2>
+${
+  meds.length === 0
+    ? `<div class="box muted">لا توجد وصفات مسجّلة</div>`
+    : `<table class="data">
+  <tr><th>الدواء</th><th>الطبيب المعالج</th><th>التخصص</th><th>الصيدلي</th><th>تاريخ الصرف</th><th>مكان الصرف</th><th>المراجعة القادمة</th></tr>
+  ${meds
+    .map(
+      (m) => `<tr>
+      <td>${esc(m.trade_name || m.scientific_name || '—')}</td>
+      <td>${esc(m.prescriber)}</td>
+      <td>${esc(m.prescriber_specialty)}</td>
+      <td>${esc(m.pharmacist)}</td>
+      <td>${esc(m.dispense_date)}</td>
+      <td>${esc(m.dispense_place)}</td>
+      <td>${esc(m.next_review)}</td>
+    </tr>`
+    )
+    .join('')}
+</table>`
+}`
+    : ''
+}
+
+<h2>${full ? '5' : '4'}. سجل المواعيد</h2>
+${
+  appts.length === 0
+    ? `<div class="box muted">لا توجد مواعيد</div>`
+    : `<table class="data">
+  <tr><th>التاريخ</th><th>الوقت</th><th>السبب</th><th>الحالة</th><th>ملاحظات</th></tr>
+  ${appts
+    .slice(0, full ? 100 : 15)
+    .map(
+      (a) =>
+        `<tr><td>${esc(a.date)}</td><td>${esc(a.time)}</td><td>${esc(a.reason)}</td><td>${esc(a.status)}</td><td>${esc(a.notes)}</td></tr>`
+    )
+    .join('')}
+</table>`
+}
+
+${
+  full
+    ? `<h2>6. سجل الفواتير</h2>
+${
+  invoices.length === 0
+    ? `<div class="box muted">لا توجد فواتير</div>`
+    : `<table class="data">
+  <tr><th>الرقم</th><th>التاريخ</th><th>الإجمالي (ل.س)</th><th>المدفوع</th><th>المتبقي</th><th>الحالة</th></tr>
+  ${invoices
+    .map(
+      (inv) =>
+        `<tr><td>${esc(inv.invoice_no)}</td><td>${esc(inv.date)}</td><td>${fmt(inv.total)}</td><td>${fmt(inv.paid)}</td><td>${fmt(inv.total - inv.paid)}</td><td>${esc(inv.status)}</td></tr>`
+    )
+    .join('')}
+</table>`
+}`
+    : ''
+}
+
+<div class="sign">
+  <div>توقيع الطبيب المعالج</div>
+  <div>توقيع المريض</div>
+</div>
+${settings.receipt_footer ? `<div class="meta" style="text-align:center;margin-top:10px">${esc(settings.receipt_footer)}</div>` : ''}
+</body></html>`
+}
+
+function buildPrescriptionHtml(
+  file: NonNullable<ReturnType<typeof getPatientFile>>,
+  settings: Settings,
+  meds: Medication[],
+  diagnosis: string,
+  note: string
+): string {
+  const esc = escapeHtml
+  const p = file.patient
+  const today = new Date().toLocaleDateString('en-GB')
+  const age = ((): string => {
+    if (!p.birth_date) return ''
+    const b = new Date(p.birth_date)
+    if (isNaN(b.getTime())) return ''
+    const now = new Date()
+    let a = now.getFullYear() - b.getFullYear()
+    const md = now.getMonth() - b.getMonth()
+    if (md < 0 || (md === 0 && now.getDate() < b.getDate())) a--
+    return a >= 0 ? `${a} سنة` : ''
+  })()
+
+  const rows = meds
+    .map((m, i) => {
+      const name = esc(m.trade_name || m.scientific_name || '—')
+      const sci = m.scientific_name && m.trade_name ? `<span class="sci">${esc(m.scientific_name)}</span>` : ''
+      const line = [m.dose, m.form, m.route].filter(Boolean).map(esc).join(' — ')
+      const dur = [m.start_date, m.end_date].filter(Boolean).join(' ← ')
+      const freq = esc(m.frequency)
+      return `<li>
+        <div class="med-name"><span class="num">${i + 1}.</span> ${name} ${sci}</div>
+        <div class="med-line">${line}</div>
+        ${freq ? `<div class="med-line">${freq}${dur ? ' — ' + esc(dur) : ''}</div>` : dur ? `<div class="med-line">${esc(dur)}</div>` : ''}
+        ${m.notes ? `<div class="med-note">${esc(m.notes)}</div>` : ''}
+      </li>`
+    })
+    .join('')
+
+  const allergy = (p.allergies ?? '').trim()
+
+  return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
+<style>
+@page { margin: 10mm; size: A5; }
+body { font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 12px; color: #111; line-height: 1.5; margin: 0; }
+.head { text-align: center; border-bottom: 2px solid #0e7c66; padding-bottom: 6px; margin-bottom: 10px; }
+.head h1 { font-size: 18px; margin: 0 0 2px; color: #0e7c66; }
+.meta { font-size: 11px; color: #444; }
+.patient { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; margin-bottom: 10px; background: #f8fafc; }
+.patient b { color: #0f172a; }
+.rx { font-size: 26px; font-weight: 700; color: #0e7c66; font-family: Georgia, serif; margin: 0 0 4px; }
+ul.meds { list-style: none; padding: 0; margin: 0 0 10px; }
+ul.meds li { border-bottom: 1px dashed #cbd5e1; padding: 6px 0; }
+.med-name { font-weight: 700; font-size: 13px; }
+.med-name .num { color: #0e7c66; }
+.sci { color: #64748b; font-size: 10px; font-weight: 400; }
+.med-line { color: #334155; font-size: 11.5px; }
+.med-note { color: #64748b; font-size: 10.5px; font-style: italic; }
+.box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; margin-bottom: 8px; font-size: 11.5px; }
+.alert { border-color: #fca5a5; background: #fef2f2; }
+.alert b { color: #b91c1c; }
+.sign { margin-top: 22px; display: flex; justify-content: space-between; font-size: 11px; }
+.sign div { border-top: 1px solid #111; padding-top: 4px; width: 45%; text-align: center; }
+.foot { margin-top: 8px; text-align: center; font-size: 10.5px; color: #64748b; }
+</style></head><body>
+<div class="head">
+  <h1>${esc(settings.clinic_name)}</h1>
+  <div class="meta">${esc(settings.clinic_phone)}${settings.clinic_address ? ' — ' + esc(settings.clinic_address) : ''}</div>
+  <div class="meta">وصفة طبية — ${today}</div>
+</div>
+
+<div class="patient">
+  <span><b>المريض:</b> ${esc(p.name)}</span>
+  ${age ? `<span><b>العمر:</b> ${age}</span>` : ''}
+  ${p.gender ? `<span><b>الجنس:</b> ${esc(p.gender)}</span>` : ''}
+  ${p.national_id ? `<span><b>رقم الملف:</b> ${esc(p.national_id)}</span>` : ''}
+</div>
+
+${allergy ? `<div class="box alert"><b>تنبيه — حساسية معروفة:</b> ${esc(allergy)}</div>` : ''}
+${diagnosis ? `<div class="box"><b>التشخيص:</b> ${esc(diagnosis)}</div>` : ''}
+
+<div class="rx">℞</div>
+${
+  meds.length === 0
+    ? `<div class="box">لم يتم اختيار أي دواء لهذه الوصفة.</div>`
+    : `<ul class="meds">${rows}</ul>`
+}
+
+${note ? `<div class="box"><b>تعليمات عامة:</b> ${esc(note)}</div>` : ''}
+
+<div class="sign">
+  <div>توقيع الطبيب / الختم</div>
+  <div>اسم الطبيب واختصاصه</div>
+</div>
+${settings.receipt_footer ? `<div class="foot">${esc(settings.receipt_footer)}</div>` : ''}
+</body></html>`
+}
+
+function printHtml(
+  html: string,
+  printerName?: string,
+  pageSize: Electron.WebContentsPrintOptions['pageSize'] = 'A6'
+): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const win = new BrowserWindow({
       show: false,
@@ -519,7 +944,7 @@ function printHtml(html: string, printerName?: string): Promise<{ ok: boolean; e
       const opts: Electron.WebContentsPrintOptions = {
         silent: true,
         margins: { marginType: 'none' },
-        pageSize: 'A6',
+        pageSize,
         copies: 1
       }
       if (printerName) opts.deviceName = printerName

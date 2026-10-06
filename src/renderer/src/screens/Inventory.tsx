@@ -4,7 +4,7 @@ import DataGrid from '../table'
 import type { Col } from '../table'
 import ExcelBar from '../excel'
 import type { Material, Role, Settings, StockMovement } from '../lib'
-import { can, fmt } from '../lib'
+import { can, fmt, toLatinDigits } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 const cols: Col<Material>[] = [
@@ -19,12 +19,6 @@ const cols: Col<Material>[] = [
   { key: 'min_qty', label: 'الحد الأدنى', type: 'number' },
   { key: 'unit', label: 'الوحدة' },
   { key: 'cost', label: 'الكلفة', type: 'money' },
-  {
-    key: 'cost_usd',
-    label: 'الكلفة ($)',
-    type: 'display',
-    render: (m) => <span dir="ltr">{m.cost_usd ? `${fmt(m.cost_usd)} $` : '—'}</span>
-  },
   { key: 'supplier', label: 'المورد' },
   { key: 'notes', label: 'ملاحظات' }
 ]
@@ -310,15 +304,15 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
             </Field>
             <Field label="الكمية الافتتاحية">
-              <input type="number" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
+              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(toLatinDigits(e.target.value)) })} />
             </Field>
             <Field label="الحد الأدنى">
-              <input type="number" step="0.01" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: Number(e.target.value) })} />
+              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: Number(toLatinDigits(e.target.value)) })} />
             </Field>
             <Field label="الوحدة">
               <input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="علبة / حبة / ملم..." />
             </Field>
-<Field label="الكلفة (ل.ل أو $)">
+<Field label="الكلفة (ل.س أو $)">
                 <CurrencyInput
                   dual
                   valueLbp={Number(form.cost) || 0}
@@ -332,7 +326,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
                 <div className="flex between" style={{ fontWeight: 800, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}>
                   <span>القيمة الإجمالية (الكلفة × الكمية {form.quantity ? `${form.quantity} ${form.unit || ''}` : ''}):</span>
                   <span>
-                    {fmt(Math.round((Number(form.cost) || 0) * (Number(form.quantity) || 0)))} ل.ل (
+                    {fmt(Math.round((Number(form.cost) || 0) * (Number(form.quantity) || 0)))} ل.س (
                     {(((Number(form.cost) || 0) * (Number(form.quantity) || 0)) / rate).toFixed(2)} $)
                   </span>
                 </div>
@@ -365,7 +359,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               <input value={adjusting.quantity} disabled />
             </Field>
             <Field label="التغيير (+ للزيادة / - للنقصان)">
-              <input type="number" step="0.01" value={adjQty} onChange={(e) => setAdjQty(Number(e.target.value))} autoFocus />
+              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={adjQty} onChange={(e) => setAdjQty(Number(toLatinDigits(e.target.value)))} autoFocus />
             </Field>
             <Field label="ملاحظة">
               <input value={adjNote} onChange={(e) => setAdjNote(e.target.value)} />

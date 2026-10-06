@@ -5,6 +5,8 @@ import { getDb, getSettings } from './db'
 const SYNC_TABLES: string[] = [
   'users',
   'patients',
+  'patient_medications',
+  'medicines',
   'materials',
   'catalog',
   'catalog_materials',
@@ -28,6 +30,8 @@ const DELETE_ORDER: string[] = [
   'catalog',
   'materials',
   'expenses',
+  'patient_medications',
+  'medicines',
   'patients',
   'users',
   'settings'
@@ -36,6 +40,8 @@ const DELETE_ORDER: string[] = [
 const INSERT_ORDER: string[] = [
   'users',
   'patients',
+  'patient_medications',
+  'medicines',
   'materials',
   'catalog',
   'catalog_materials',
