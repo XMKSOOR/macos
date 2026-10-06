@@ -16,6 +16,7 @@ class SupabaseApi(
   private val anonKey: String,
   var token: String? = null
 ) {
+  var refreshToken: String? = null
   companion object {
     private val JSON = "application/json; charset=utf-8".toMediaType()
     val client: OkHttpClient = OkHttpClient.Builder()
@@ -73,6 +74,23 @@ class SupabaseApi(
     val map = gson.fromJson(text, Map::class.java) as Map<String, Any?>
     token = map["access_token"]?.toString()
       ?: throw Exception("لم يُعد الخادم رمز دخول")
+    refreshToken = map["refresh_token"]?.toString()
+  }
+
+  suspend fun refresh(refreshToken: String) {
+    val body = gson.toJson(mapOf("refresh_token" to refreshToken)).toRequestBody(JSON)
+    val req = Request.Builder()
+      .url(url("/auth/v1/token?grant_type=refresh_token"))
+      .post(body)
+      .header("apikey", anonKey)
+      .header("Content-Type", "application/json")
+      .build()
+    val text = execute(req)
+    @Suppress("UNCHECKED_CAST")
+    val map = gson.fromJson(text, Map::class.java) as Map<String, Any?>
+    token = map["access_token"]?.toString()
+      ?: throw Exception("تعذّر تجديد الجلسة")
+    this.refreshToken = map["refresh_token"]?.toString()
   }
 
   suspend fun get(path: String): String {

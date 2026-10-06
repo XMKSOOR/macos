@@ -36,9 +36,16 @@ fun today(): String {
 }
 
 @Composable
-fun LoadingBox(modifier: Modifier = Modifier) {
-  Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+fun LoadingBox(message: String? = null, modifier: Modifier = Modifier) {
+  Column(
+    modifier = modifier.fillMaxSize(),
+    horizontalAlignment = Alignment.CenterHorizontally,
+    verticalArrangement = Arrangement.Center
+  ) {
     CircularProgressIndicator()
+    if (message != null) {
+      Text(message, modifier = Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
   }
 }
 

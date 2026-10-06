@@ -17,8 +17,23 @@ class ClinicRepo(private val prefs: Prefs) {
   suspend fun login(email: String, password: String) {
     val a = SupabaseApi(prefs.baseUrl(), prefs.anonKey())
     a.login(email, password)
-    prefs.setToken(a.token ?: "")
+    prefs.setSession(a.token ?: "", a.refreshToken ?: "")
     prefs.setEmail(email)
+  }
+
+  /** يجدد الجلسة المحفوظة عند التشغيل حتى لا يُطلب الدخول مجدداً. */
+  suspend fun ensureSession(): Boolean {
+    if (!prefs.loggedIn()) return false
+    val rt = prefs.refreshToken()
+    if (rt.isBlank()) return true
+    return try {
+      val a = SupabaseApi(prefs.baseUrl(), prefs.anonKey())
+      a.refresh(rt)
+      prefs.setSession(a.token ?: "", a.refreshToken ?: rt)
+      true
+    } catch (_: Exception) {
+      false
+    }
   }
 
   fun logout() = prefs.clearSession()

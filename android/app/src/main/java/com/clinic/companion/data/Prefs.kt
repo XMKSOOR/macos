@@ -14,12 +14,20 @@ class Prefs(context: Context) {
   fun setAnonKey(v: String) = sp.edit().putString("anonKey", v.trim()).apply()
 
   fun token(): String = sp.getString("token", "") ?: ""
-  fun setToken(v: String) = sp.edit().putString("token", v).apply()
+  fun refreshToken(): String = sp.getString("refresh", "") ?: ""
+
+  fun setSession(access: String, refresh: String) =
+    sp.edit().putString("token", access).putString("refresh", refresh).apply()
 
   fun email(): String = sp.getString("email", "") ?: ""
   fun setEmail(v: String) = sp.edit().putString("email", v).apply()
 
+  fun ensureDefaults() {
+    if (baseUrl().isBlank()) setBaseUrl(AppDefaults.SUPABASE_URL)
+    if (anonKey().isBlank()) setAnonKey(AppDefaults.SUPABASE_ANON_KEY)
+  }
+
   fun configured(): Boolean = baseUrl().isNotBlank() && anonKey().isNotBlank()
   fun loggedIn(): Boolean = token().isNotBlank()
-  fun clearSession() = sp.edit().remove("token").apply()
+  fun clearSession() = sp.edit().remove("token").remove("refresh").apply()
 }
