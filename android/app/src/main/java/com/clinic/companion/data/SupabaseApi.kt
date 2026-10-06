@@ -110,6 +110,17 @@ class SupabaseApi(
 
   suspend fun insert(table: String, obj: Any): String = insert(table, gson.toJson(obj))
 
+  /** إدراج مع دمج التكرارات (upsert على المفتاح الأساسي) — يُرجع الصفوف المدرجة. */
+  suspend fun upsert(table: String, json: String): String {
+    val req = Request.Builder()
+      .url(url("/rest/v1/$table"))
+      .post(json.toRequestBody(JSON))
+      .auth()
+      .header("Prefer", "resolution=merge-duplicates,return=representation")
+      .build()
+    return execute(req)
+  }
+
   suspend fun update(table: String, filter: String, obj: Any): String {
     val req = Request.Builder()
       .url(url("/rest/v1/$table?$filter"))

@@ -40,10 +40,17 @@ data class Invoice(
   val discount: Long = 0,
   val total: Long = 0,
   val paid: Long = 0,
+  @SerializedName("subtotal_usd") val subtotalUsd: Double = 0.0,
+  @SerializedName("discount_usd") val discountUsd: Double = 0.0,
+  @SerializedName("total_usd") val totalUsd: Double = 0.0,
+  @SerializedName("paid_usd") val paidUsd: Double = 0.0,
   val status: String = "unpaid",
   val notes: String = "",
   @SerializedName("created_by") val createdBy: String = "",
-  @SerializedName("created_at") val createdAt: String = ""
+  @SerializedName("created_at") val createdAt: String = "",
+  @SerializedName("patient_name") val patientName: String? = null,
+  @SerializedName("patient_phone") val patientPhone: String? = null,
+  val items: List<InvoiceItem> = emptyList()
 )
 
 data class InvoiceItem(
@@ -51,7 +58,83 @@ data class InvoiceItem(
   @SerializedName("invoice_id") val invoiceId: Long = 0,
   val name: String = "",
   val cost: Long = 0,
-  val qty: Long = 1
+  val qty: Long = 1,
+  @SerializedName("catalog_id") val catalogId: Long? = null,
+  @SerializedName("cost_usd") val costUsd: Double = 0.0
+)
+
+data class CatalogMaterial(
+  @SerializedName("material_id") val materialId: Long = 0,
+  val qty: Double = 0.0,
+  val name: String = "",
+  val unit: String = ""
+)
+
+data class CatalogItem(
+  val id: Long = 0,
+  val name: String = "",
+  val price: Long = 0,
+  val cost: Long = 0,
+  @SerializedName("price_usd") val priceUsd: Double = 0.0,
+  @SerializedName("cost_usd") val costUsd: Double = 0.0,
+  val description: String = "",
+  @SerializedName("created_at") val createdAt: String = "",
+  val materials: List<CatalogMaterial> = emptyList()
+)
+
+data class Material(
+  val id: Long = 0,
+  val name: String = "",
+  val category: String = "",
+  val unit: String = "",
+  val quantity: Double = 0.0,
+  @SerializedName("min_qty") val minQty: Double = 0.0,
+  val cost: Long = 0,
+  @SerializedName("cost_usd") val costUsd: Double = 0.0,
+  val supplier: String = "",
+  val notes: String = "",
+  @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class StockMovement(
+  val id: Long = 0,
+  @SerializedName("material_id") val materialId: Long = 0,
+  val qty: Double = 0.0,
+  val operation: String = "",
+  val reference: String = "",
+  @SerializedName("user_name") val userName: String = "",
+  val note: String = "",
+  @SerializedName("created_at") val createdAt: String = "",
+  @SerializedName("material_name") val materialName: String? = null
+)
+
+data class Expense(
+  val id: Long = 0,
+  val category: String = "",
+  val amount: Long = 0,
+  @SerializedName("amount_usd") val amountUsd: Double = 0.0,
+  val note: String = "",
+  val date: String = "",
+  @SerializedName("created_by") val createdBy: String = "",
+  @SerializedName("created_at") val createdAt: String = "",
+  @SerializedName("is_recurring") val isRecurring: Int = 0,
+  val recurrence: String = "monthly",
+  @SerializedName("next_due") val nextDue: String = ""
+)
+
+data class AppUser(
+  val id: Long = 0,
+  val username: String = "",
+  val role: String = "cashier",
+  @SerializedName("full_name") val fullName: String = "",
+  @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class DraftItem(
+  var name: String = "",
+  var cost: Long = 0,
+  var qty: Long = 1,
+  var catalogId: Long? = null
 )
 
 data class PatientMedication(

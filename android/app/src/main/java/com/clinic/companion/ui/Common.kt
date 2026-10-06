@@ -35,6 +35,11 @@ fun today(): String {
   return "%04d-%02d-%02d".format(c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH))
 }
 
+fun parseMoney(s: String): Long = Math.round((s.trim().toDoubleOrNull() ?: 0.0) * 100)
+
+fun moneyInput(v: Long): String =
+  if (v % 100 == 0L) (v / 100).toString() else (v / 100.0).toString()
+
 @Composable
 fun LoadingBox(message: String? = null, modifier: Modifier = Modifier) {
   Column(
@@ -90,10 +95,10 @@ fun InfoRow(label: String, value: String?) {
 fun LabeledField(
   label: String,
   value: String,
-  onValueChange: (String) -> Unit,
   modifier: Modifier = Modifier,
   singleLine: Boolean = true,
-  minLines: Int = 1
+  minLines: Int = 1,
+  onValueChange: (String) -> Unit
 ) {
   OutlinedTextField(
     value = value,

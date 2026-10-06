@@ -152,17 +152,17 @@ private fun AddPatientDialog(onDismiss: () -> Unit, onSave: (Map<String, Any?>) 
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        LabeledField("الاسم *", name, { name = it })
-        LabeledField("الهاتف", phone, { phone = it })
+        LabeledField("الاسم *", name) { name = it }
+        LabeledField("الهاتف", phone) { phone = it }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          LabeledField("الجنس", gender, { gender = it }, Modifier.weight(1f))
-          LabeledField("تاريخ الميلاد", birth, { birth = it }, Modifier.weight(1f))
+          LabeledField("الجنس", gender, Modifier.weight(1f)) { gender = it }
+          LabeledField("تاريخ الميلاد", birth, Modifier.weight(1f)) { birth = it }
         }
-        LabeledField("الرقم الوطني", nationalId, { nationalId = it })
-        LabeledField("العنوان", address, { address = it })
-        LabeledField("الحساسية", allergies, { allergies = it })
-        LabeledField("الأمراض المزمنة", chronic, { chronic = it })
-        LabeledField("ملاحظات", notes, { notes = it }, singleLine = false, minLines = 2)
+        LabeledField("الرقم الوطني", nationalId) { nationalId = it }
+        LabeledField("العنوان", address) { address = it }
+        LabeledField("الحساسية", allergies) { allergies = it }
+        LabeledField("الأمراض المزمنة", chronic) { chronic = it }
+        LabeledField("ملاحظات", notes, singleLine = false, minLines = 2) { notes = it }
       }
     },
     confirmButton = {

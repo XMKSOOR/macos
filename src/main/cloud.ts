@@ -119,25 +119,11 @@ function countLocal(t: string): number {
   }
 }
 
-function deleteAllPath(t: string): string {
-  // settings مفتاحها الأساسي key وليس id
-  return t === 'settings' ? `/settings?key=not.is.null` : `/${t}?id=gte.0`
-}
-
 export async function cloudPush(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
 
-  // 1) حذف كل الصفوف (الأبناء أولاً)
-  for (const t of DELETE_ORDER) {
-    const res = await request(cfg, deleteAllPath(t), {
-      method: 'DELETE',
-      headers: { Prefer: 'return=minimal' }
-    })
-    if (!res.ok && res.status !== 404) await fail(res)
-  }
-
-  // 2) إدخال النسخة المحلية (الآباء أولاً)
+  // دمج النسخة المحلية في السحابة دون حذف صفوف أُنشئت من الجوال (upsert بالمعرّف)
   let count = 0
   for (const t of INSERT_ORDER) {
     const rows = readLocalTable(t)
@@ -151,7 +137,7 @@ export async function cloudPush(): Promise<string> {
     if (!res.ok) await fail(res)
   }
 
-  // 3) تصحيح تسلسلات المعرّفات على الخادم
+  // تصحيح تسلسلات المعرّفات على الخادم
   await request(cfg, '/rpc/reset_sequences', { method: 'POST', body: '{}' })
 
   return `تم رفع نسخة كاملة إلى Supabase Postgres (${count} صفاً في ${INSERT_ORDER.length} جداول)`

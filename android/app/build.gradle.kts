@@ -18,8 +18,8 @@ android {
     applicationId = "com.clinic.companion"
     minSdk = 24
     targetSdk = 34
-    versionCode = 2
-    versionName = "1.0.1"
+    versionCode = 3
+    versionName = "1.0.2"
     vectorDrawables { useSupportLibrary = true }
   }
 
@@ -85,6 +85,7 @@ dependencies {
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
+  implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }

@@ -167,9 +167,9 @@ private fun AddAppointmentDialog(
             }
           }
         }
-        LabeledField("التاريخ (YYYY-MM-DD)", date, { date = it })
-        LabeledField("الوقت (HH:MM)", time, { time = it })
-        LabeledField("السبب", reason, { reason = it })
+        LabeledField("التاريخ (YYYY-MM-DD)", date) { date = it }
+        LabeledField("الوقت (HH:MM)", time) { time = it }
+        LabeledField("السبب", reason) { reason = it }
       }
     },
     confirmButton = {
