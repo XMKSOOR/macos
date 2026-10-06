@@ -23,12 +23,22 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Decode release keystore
+        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+        working-directory: android
+        run: echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release-keystore.jks
+
       - name: Build debug APK
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Build release APK (unsigned-ish, debug-signed)
+      - name: Build release APK (signed)
         working-directory: android
+        env:
+          RELEASE_KEYSTORE_FILE: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && 'release-keystore.jks' || '' }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload APKs

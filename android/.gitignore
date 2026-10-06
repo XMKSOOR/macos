@@ -6,3 +6,10 @@ local.properties
 captures/
 .cxx/
 app/build/
+
+# Signing secrets - NEVER commit
+*.jks
+*.keystore
+keystore.properties
+release-keystore.b64
+KEYSTORE-INFO.txt

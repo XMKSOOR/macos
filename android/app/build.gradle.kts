@@ -1,6 +1,13 @@
+import java.util.Properties
+
 plugins {
   id("com.android.application")
   id("org.jetbrains.kotlin.android")
+}
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+  if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
 
 android {
@@ -33,12 +40,24 @@ android {
     jvmTarget = "17"
   }
 
+  signingConfigs {
+    create("release") {
+      val storePath = keystoreProps.getProperty("storeFile") ?: System.getenv("RELEASE_KEYSTORE_FILE")
+      if (!storePath.isNullOrBlank()) {
+        storeFile = rootProject.file(storePath)
+        storePassword = keystoreProps.getProperty("storePassword") ?: System.getenv("RELEASE_STORE_PASSWORD")
+        keyAlias = keystoreProps.getProperty("keyAlias") ?: System.getenv("RELEASE_KEY_ALIAS")
+        keyPassword = keystoreProps.getProperty("keyPassword") ?: System.getenv("RELEASE_KEY_PASSWORD")
+      }
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // توقيع تجريبي حتى يمكن تثبيت نسخة الإصدار مباشرة
-      signingConfig = signingConfigs.getByName("debug")
+      val releaseSigning = signingConfigs.getByName("release")
+      signingConfig = if (releaseSigning.storeFile != null) releaseSigning else signingConfigs.getByName("debug")
     }
   }
 
