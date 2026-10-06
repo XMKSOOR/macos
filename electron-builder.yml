@@ -27,6 +27,7 @@ mac:
     - target: dmg
       arch:
         - x64
+        - arm64
   icon: build/icon.icns
   category: public.app-category.medical
   identity: null
