@@ -472,3 +472,78 @@ export interface FeasibilityPlan {
   planTargets: number[]
   ratios: number[]
 }
+
+export type ToothCondition = 'healthy' | 'caries' | 'filling' | 'crown' | 'missing' | 'implant' | 'root_canal' | 'fracture' | 'sealant' | 'extracted'
+
+export type ToothSurface = 'M' | 'D' | 'O' | 'B' | 'L'
+
+export interface DentalChartEntry {
+  id: number
+  patient_id: number
+  tooth_number: string
+  condition: ToothCondition
+  surfaces: string
+  notes: string
+  created_at: string
+  updated_at: string
+}
+
+export type TreatmentPlanStatus = 'proposed' | 'accepted' | 'in_progress' | 'completed' | 'cancelled'
+
+export interface TreatmentPlanItem {
+  id: number
+  plan_id: number
+  tooth_number: string
+  procedure_name: string
+  cost: number
+  status: 'pending' | 'done' | 'cancelled'
+  notes: string
+  sort_order: number
+}
+
+export interface TreatmentPlan {
+  id: number
+  patient_id: number
+  title: string
+  status: TreatmentPlanStatus
+  total_cost: number
+  notes: string
+  created_at: string
+  updated_at: string
+  items: TreatmentPlanItem[]
+}
+
+export interface PeriodontalChartEntry {
+  id: number
+  patient_id: number
+  tooth_number: string
+  pocket_depth: number
+  bleeding: number
+  mobility: number
+  recession: number
+  notes: string
+  created_at: string
+}
+
+export interface ProcedureTemplate {
+  id: number
+  name: string
+  category: string
+  description: string
+  default_cost: number
+  materials: string
+  created_at: string
+}
+
+export type RecallType = 'checkup' | 'cleaning' | 'followup'
+
+export interface RecallReminder {
+  id: number
+  patient_id: number
+  recall_type: RecallType
+  due_date: string
+  status: 'pending' | 'done' | 'cancelled'
+  notes: string
+  created_at: string
+  patient_name?: string
+}

@@ -8,6 +8,7 @@ import type {
   Appointment,
   CatalogBomInput,
   CatalogItem,
+  DentalChartEntry,
   Expense,
   Invoice,
   InvoiceItemInput,
@@ -19,11 +20,17 @@ import type {
   Patient,
   PatientAttachment,
   PatientFileResult,
+  PeriodontalChartEntry,
+  ProcedureTemplate,
+  RecallReminder,
+  RecallType,
   Recurrence,
   DueRecurringExpense,
   Role,
   Settings,
   StockMovement,
+  TreatmentPlan,
+  TreatmentPlanItem,
   User,
   PermissionOverride,
   DashboardStats
@@ -249,6 +256,70 @@ CREATE TABLE IF NOT EXISTS medicines (
   frequency TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT 'prescription',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS dental_charts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  tooth_number TEXT NOT NULL,
+  condition TEXT NOT NULL DEFAULT 'healthy',
+  surfaces TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS treatment_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'proposed',
+  total_cost INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS treatment_plan_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  plan_id INTEGER NOT NULL,
+  tooth_number TEXT NOT NULL DEFAULT '',
+  procedure_name TEXT NOT NULL,
+  cost INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  notes TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (plan_id) REFERENCES treatment_plans(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS periodontal_charts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  tooth_number TEXT NOT NULL,
+  pocket_depth INTEGER NOT NULL DEFAULT 0,
+  bleeding INTEGER NOT NULL DEFAULT 0,
+  mobility INTEGER NOT NULL DEFAULT 0,
+  recession INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS procedure_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  default_cost INTEGER NOT NULL DEFAULT 0,
+  materials TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS recall_reminders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  recall_type TEXT NOT NULL DEFAULT 'checkup',
+  due_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 `)
   ensureCurrencyColumns()
@@ -1627,6 +1698,133 @@ export function dashboardStats(period: string): DashboardStats {
     by_status,
     recent_invoices
   }
+}
+
+// ---- Dental Charts (Odontogram) ----
+export function listDentalCharts(patientId: number): DentalChartEntry[] {
+  return db.prepare('SELECT * FROM dental_charts WHERE patient_id=? ORDER BY tooth_number').all(patientId) as unknown as DentalChartEntry[]
+}
+
+export function saveDentalChart(patientId: number, toothNumber: string, condition: string, surfaces: string, notes: string): void {
+  const existing = db.prepare('SELECT id FROM dental_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: number } | undefined
+  if (existing) {
+    db.prepare("UPDATE dental_charts SET condition=?, surfaces=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?").run(condition, surfaces, notes, existing.id)
+  } else {
+    db.prepare('INSERT INTO dental_charts (patient_id, tooth_number, condition, surfaces, notes) VALUES (?,?,?,?,?)').run(patientId, toothNumber, condition, surfaces, notes)
+  }
+}
+
+export function deleteDentalChart(patientId: number, toothNumber: string): void {
+  db.prepare('DELETE FROM dental_charts WHERE patient_id=? AND tooth_number=?').run(patientId, toothNumber)
+}
+
+// ---- Treatment Plans ----
+export function listTreatmentPlans(patientId: number): TreatmentPlan[] {
+  const plans = db.prepare('SELECT * FROM treatment_plans WHERE patient_id=? ORDER BY id DESC').all(patientId) as unknown as TreatmentPlan[]
+  return plans.map((p) => ({
+    ...p,
+    items: db.prepare('SELECT * FROM treatment_plan_items WHERE plan_id=? ORDER BY sort_order, id').all(p.id) as unknown as TreatmentPlanItem[]
+  }))
+}
+
+export function createTreatmentPlan(patientId: number, title: string, notes: string): TreatmentPlan {
+  const r = db.prepare('INSERT INTO treatment_plans (patient_id, title, notes) VALUES (?,?,?)').run(patientId, title, notes)
+  return { id: Number(r.lastInsertRowid), patient_id: patientId, title, status: 'proposed', total_cost: 0, notes, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), items: [] }
+}
+
+export function updateTreatmentPlan(id: number, title: string, status: string, notes: string): void {
+  db.prepare("UPDATE treatment_plans SET title=?, status=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?").run(title, status, notes, id)
+}
+
+export function deleteTreatmentPlan(id: number): void {
+  db.prepare('BEGIN').run()
+  try {
+    db.prepare('DELETE FROM treatment_plan_items WHERE plan_id=?').run(id)
+    db.prepare('DELETE FROM treatment_plans WHERE id=?').run(id)
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+}
+
+export function addTreatmentPlanItem(planId: number, toothNumber: string, procedureName: string, cost: number, notes: string): void {
+  const maxOrder = (db.prepare('SELECT COALESCE(MAX(sort_order),0) AS m FROM treatment_plan_items WHERE plan_id=?').get(planId) as { m: number }).m
+  db.prepare('INSERT INTO treatment_plan_items (plan_id, tooth_number, procedure_name, cost, notes, sort_order) VALUES (?,?,?,?,?,?)').run(planId, toothNumber, procedureName, cost, notes, maxOrder + 1)
+  const total = (db.prepare('SELECT COALESCE(SUM(cost),0) AS s FROM treatment_plan_items WHERE plan_id=? AND status!="cancelled"').get(planId) as { s: number }).s
+  db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
+}
+
+export function updateTreatmentPlanItem(id: number, status: string, cost: number): void {
+  db.prepare('UPDATE treatment_plan_items SET status=?, cost=? WHERE id=?').run(status, cost, id)
+  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: number }).plan_id
+  const total = (db.prepare('SELECT COALESCE(SUM(cost),0) AS s FROM treatment_plan_items WHERE plan_id=? AND status!="cancelled"').get(planId) as { s: number }).s
+  db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
+}
+
+export function deleteTreatmentPlanItem(id: number): void {
+  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: number }).plan_id
+  db.prepare('DELETE FROM treatment_plan_items WHERE id=?').run(id)
+  const total = (db.prepare('SELECT COALESCE(SUM(cost),0) AS s FROM treatment_plan_items WHERE plan_id=? AND status!="cancelled"').get(planId) as { s: number }).s
+  db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
+}
+
+// ---- Periodontal Charts ----
+export function listPeriodontalCharts(patientId: number): PeriodontalChartEntry[] {
+  return db.prepare('SELECT * FROM periodontal_charts WHERE patient_id=? ORDER BY tooth_number').all(patientId) as unknown as PeriodontalChartEntry[]
+}
+
+export function savePeriodontalChart(patientId: number, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): void {
+  const existing = db.prepare('SELECT id FROM periodontal_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: number } | undefined
+  if (existing) {
+    db.prepare('UPDATE periodontal_charts SET pocket_depth=?, bleeding=?, mobility=?, recession=?, notes=? WHERE id=?').run(pocketDepth, bleeding, mobility, recession, notes, existing.id)
+  } else {
+    db.prepare('INSERT INTO periodontal_charts (patient_id, tooth_number, pocket_depth, bleeding, mobility, recession, notes) VALUES (?,?,?,?,?,?,?)').run(patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes)
+  }
+}
+
+export function deletePeriodontalChart(patientId: number, toothNumber: string): void {
+  db.prepare('DELETE FROM periodontal_charts WHERE patient_id=? AND tooth_number=?').run(patientId, toothNumber)
+}
+
+// ---- Procedure Templates ----
+export function listProcedureTemplates(): ProcedureTemplate[] {
+  return db.prepare('SELECT * FROM procedure_templates ORDER BY category, name').all() as unknown as ProcedureTemplate[]
+}
+
+export function createProcedureTemplate(t: Omit<ProcedureTemplate, 'id' | 'created_at'>): ProcedureTemplate {
+  const r = db.prepare('INSERT INTO procedure_templates (name, category, description, default_cost, materials) VALUES (?,?,?,?,?)').run(t.name, t.category, t.description, t.default_cost, t.materials)
+  return { ...t, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+}
+
+export function updateProcedureTemplate(id: number, t: Omit<ProcedureTemplate, 'id' | 'created_at'>): void {
+  db.prepare('UPDATE procedure_templates SET name=?, category=?, description=?, default_cost=?, materials=? WHERE id=?').run(t.name, t.category, t.description, t.default_cost, t.materials, id)
+}
+
+export function deleteProcedureTemplate(id: number): void {
+  db.prepare('DELETE FROM procedure_templates WHERE id=?').run(id)
+}
+
+// ---- Recall Reminders ----
+export function listRecallReminders(): RecallReminder[] {
+  return db.prepare(`
+    SELECT r.*, p.name AS patient_name FROM recall_reminders r
+    JOIN patients p ON p.id=r.patient_id
+    WHERE r.status='pending' ORDER BY r.due_date ASC LIMIT 200
+  `).all() as unknown as RecallReminder[]
+}
+
+export function createRecallReminder(patientId: number, recallType: RecallType, dueDate: string, notes: string): RecallReminder {
+  const r = db.prepare('INSERT INTO recall_reminders (patient_id, recall_type, due_date, notes) VALUES (?,?,?,?)').run(patientId, recallType, dueDate, notes)
+  return { id: Number(r.lastInsertRowid), patient_id: patientId, recall_type: recallType, due_date: dueDate, status: 'pending', notes, created_at: new Date().toISOString() }
+}
+
+export function completeRecallReminder(id: number): void {
+  db.prepare("UPDATE recall_reminders SET status='done' WHERE id=?").run(id)
+}
+
+export function deleteRecallReminder(id: number): void {
+  db.prepare('DELETE FROM recall_reminders WHERE id=?').run(id)
 }
 
 // ---- Maintenance ----
