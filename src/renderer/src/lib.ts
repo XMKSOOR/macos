@@ -93,6 +93,7 @@ export type ScreenKey =
   | 'users'
   | 'settings'
   | 'finances'
+  | 'dental'
 
 export interface Toast {
   id: number

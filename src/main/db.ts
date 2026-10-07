@@ -316,11 +316,144 @@ CREATE TABLE IF NOT EXISTS recall_reminders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   patient_id INTEGER NOT NULL,
   recall_type TEXT NOT NULL DEFAULT 'checkup',
-  due_date TEXT NOT NULL,
+  due_date TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS tooth_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  tooth_number TEXT NOT NULL DEFAULT '',
+  date TEXT NOT NULL DEFAULT '',
+  procedure_name TEXT NOT NULL DEFAULT '',
+  doctor TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS anesthesia_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  date TEXT NOT NULL DEFAULT '',
+  tooth_number TEXT NOT NULL DEFAULT '',
+  anesthesia_type TEXT NOT NULL DEFAULT '',
+  dose TEXT NOT NULL DEFAULT '',
+  batch_no TEXT NOT NULL DEFAULT '',
+  expiry_date TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS lab_cases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  date TEXT NOT NULL DEFAULT '',
+  lab_name TEXT NOT NULL DEFAULT '',
+  case_type TEXT NOT NULL DEFAULT '',
+  tooth_number TEXT NOT NULL DEFAULT '',
+  shade TEXT NOT NULL DEFAULT '',
+  material TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  due_date TEXT NOT NULL DEFAULT '',
+  received_date TEXT NOT NULL DEFAULT '',
+  cost INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS implant_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  tooth_number TEXT NOT NULL DEFAULT '',
+  date TEXT NOT NULL DEFAULT '',
+  brand TEXT NOT NULL DEFAULT '',
+  size TEXT NOT NULL DEFAULT '',
+  position TEXT NOT NULL DEFAULT '',
+  healing_status TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS consent_forms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  date TEXT NOT NULL DEFAULT '',
+  procedure_name TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  signed_by TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS risk_assessments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  date TEXT NOT NULL DEFAULT '',
+  caries_risk TEXT NOT NULL DEFAULT '',
+  perio_risk TEXT NOT NULL DEFAULT '',
+  recommendations TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS referrals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  patient_id INTEGER NOT NULL,
+  date TEXT NOT NULL DEFAULT '',
+  direction TEXT NOT NULL DEFAULT 'out',
+  specialist TEXT NOT NULL DEFAULT '',
+  specialty TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS clinical_note_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS education_materials (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS postop_instructions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  procedure_name TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS sterilization_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date TEXT NOT NULL DEFAULT '',
+  cycle_no TEXT NOT NULL DEFAULT '',
+  device TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT '',
+  temperature TEXT NOT NULL DEFAULT '',
+  pressure TEXT NOT NULL DEFAULT '',
+  duration TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT '',
+  operator TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS insurance_fees (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL DEFAULT '',
+  procedure_name TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT '',
+  fee INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 `)
   ensureCurrencyColumns()
@@ -1883,6 +2016,77 @@ export function completeRecallReminder(id: number): void {
 
 export function deleteRecallReminder(id: number): void {
   db.prepare('DELETE FROM recall_reminders WHERE id=?').run(id)
+}
+
+// ---- Generic Dental Records Engine ----
+interface RecDef {
+  table: string
+  cols: string[]
+  patientScoped: boolean
+  order?: string
+}
+
+const RECORD_DEFS: Record<string, RecDef> = {
+  tooth_history: { table: 'tooth_history', patientScoped: true, cols: ['patient_id', 'tooth_number', 'date', 'procedure_name', 'doctor', 'notes'], order: 'date DESC, id DESC' },
+  anesthesia: { table: 'anesthesia_records', patientScoped: true, cols: ['patient_id', 'date', 'tooth_number', 'anesthesia_type', 'dose', 'batch_no', 'expiry_date', 'notes'], order: 'date DESC, id DESC' },
+  lab_cases: { table: 'lab_cases', patientScoped: true, cols: ['patient_id', 'date', 'lab_name', 'case_type', 'tooth_number', 'shade', 'material', 'status', 'due_date', 'received_date', 'cost', 'notes'], order: 'date DESC, id DESC' },
+  implants: { table: 'implant_records', patientScoped: true, cols: ['patient_id', 'tooth_number', 'date', 'brand', 'size', 'position', 'healing_status', 'notes'], order: 'id DESC' },
+  consents: { table: 'consent_forms', patientScoped: true, cols: ['patient_id', 'date', 'procedure_name', 'content', 'signed_by', 'notes'], order: 'date DESC, id DESC' },
+  risk_assessments: { table: 'risk_assessments', patientScoped: true, cols: ['patient_id', 'date', 'caries_risk', 'perio_risk', 'recommendations', 'notes'], order: 'date DESC, id DESC' },
+  referrals: { table: 'referrals', patientScoped: true, cols: ['patient_id', 'date', 'direction', 'specialist', 'specialty', 'reason', 'status', 'notes'], order: 'date DESC, id DESC' },
+  clinical_notes: { table: 'clinical_note_templates', patientScoped: false, cols: ['title', 'category', 'content'], order: 'category, title' },
+  education: { table: 'education_materials', patientScoped: false, cols: ['title', 'category', 'content'], order: 'category, title' },
+  postop: { table: 'postop_instructions', patientScoped: false, cols: ['procedure_name', 'title', 'content'], order: 'procedure_name' },
+  sterilization: { table: 'sterilization_log', patientScoped: false, cols: ['date', 'cycle_no', 'device', 'method', 'temperature', 'pressure', 'duration', 'result', 'operator', 'notes'], order: 'date DESC, id DESC' },
+  insurance_fees: { table: 'insurance_fees', patientScoped: false, cols: ['code', 'procedure_name', 'category', 'fee', 'notes'], order: 'code' },
+  procedure_templates: { table: 'procedure_templates', patientScoped: false, cols: ['name', 'category', 'description', 'default_cost', 'materials'], order: 'category, name' }
+}
+
+export function recordKindExists(kind: string): boolean {
+  return Object.prototype.hasOwnProperty.call(RECORD_DEFS, kind)
+}
+
+export function listRecords(kind: string, patientId?: number): Record<string, unknown>[] {
+  const def = RECORD_DEFS[kind]
+  if (!def) throw new Error('نوع سجل غير معروف: ' + kind)
+  const order = def.order ? ' ORDER BY ' + def.order : ''
+  if (def.patientScoped) {
+    return db.prepare(`SELECT * FROM ${def.table} WHERE patient_id=?${order}`).all(Number(patientId)) as unknown as Record<string, unknown>[]
+  }
+  return db.prepare(`SELECT * FROM ${def.table}${order}`).all() as unknown as Record<string, unknown>[]
+}
+
+function toSql(v: unknown): string | number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (v === undefined || v === null) return ''
+  return String(v)
+}
+
+export function saveRecord(kind: string, data: Record<string, unknown>): Record<string, unknown> {
+  const def = RECORD_DEFS[kind]
+  if (!def) throw new Error('نوع سجل غير معروف: ' + kind)
+  const id = data.id === undefined || data.id === null || data.id === '' ? undefined : Number(data.id)
+  if (id) {
+    const updateCols = def.cols.filter((c) => c !== 'patient_id')
+    const sets = updateCols.map((c) => `${c}=?`).join(', ')
+    const vals = updateCols.map((c) => toSql(data[c]))
+    if (def.patientScoped) {
+      db.prepare(`UPDATE ${def.table} SET ${sets} WHERE id=? AND patient_id=?`).run(...vals, id, Number(data.patient_id))
+    } else {
+      db.prepare(`UPDATE ${def.table} SET ${sets} WHERE id=?`).run(...vals, id)
+    }
+    return db.prepare(`SELECT * FROM ${def.table} WHERE id=?`).get(id) as unknown as Record<string, unknown>
+  }
+  const vals = def.cols.map((c) => toSql(data[c]))
+  const r = db.prepare(`INSERT INTO ${def.table} (${def.cols.join(',')}) VALUES (${def.cols.map(() => '?').join(',')})`).run(...vals)
+  return db.prepare(`SELECT * FROM ${def.table} WHERE id=?`).get(Number(r.lastInsertRowid)) as unknown as Record<string, unknown>
+}
+
+export function deleteRecord(kind: string, id: number): void {
+  const def = RECORD_DEFS[kind]
+  if (!def) throw new Error('نوع سجل غير معروف: ' + kind)
+  db.prepare(`DELETE FROM ${def.table} WHERE id=?`).run(Number(id))
 }
 
 // ---- Maintenance ----

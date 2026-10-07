@@ -169,13 +169,22 @@ const api = {
     complete: (id: number): Promise<boolean> => invoke('recall:complete', { id }),
     delete: (id: number): Promise<boolean> => invoke('recall:delete', { id })
   },
+records: {
+    list: (kind: string, patientId?: number): Promise<Record<string, unknown>[]> =>
+      invoke('rec:list', { kind, patientId }),
+    save: (kind: string, data: Record<string, unknown>): Promise<Record<string, unknown>> =>
+      invoke('rec:save', { kind, data }),
+    delete: (kind: string, id: number): Promise<boolean> => invoke('rec:delete', { kind, id })
+  },
   printing: {
     list: (): Promise<PrinterInfo[]> => invoke('printing:list'),
     receipt: (invoiceId: number): Promise<{ ok: boolean; error?: string }> => invoke('printing:receipt', { invoiceId }),
     patientReport: (patientId: number, mode: PatientReportMode): Promise<{ ok: boolean; error?: string }> =>
       invoke('printing:patientReport', { patientId, mode }),
     prescription: (req: { patientId: number; medicationIds: number[]; diagnosis?: string; note?: string }): Promise<{ ok: boolean; error?: string }> =>
-      invoke('printing:prescription', req)
+      invoke('printing:prescription', req),
+    document: (req: { title: string; subtitle?: string; content: string; patientName?: string }): Promise<{ ok: boolean; error?: string }> =>
+      invoke('printing:document', req)
   },
   files: {
     export: (req: SheetExportRequest): Promise<string | null> => invoke('files:export', req),

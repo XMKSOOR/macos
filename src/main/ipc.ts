@@ -79,7 +79,11 @@ import {
   updateMaterial,
   updatePatient,
   updateUser,
-  verifyPassword
+  verifyPassword,
+  listRecords,
+  saveRecord,
+  deleteRecord,
+  recordKindExists
 } from './db'
 import { exportTemplate, exportWorkbook, importFile } from './export'
 import {
@@ -360,6 +364,26 @@ export function registerIpc(ipc: IpcMain): void {
     requireAuth('edit')
     const { patientId, toothNumber } = args as { patientId: number; toothNumber: string }
     deleteDentalChart(patientId, toothNumber)
+    return true
+  })
+
+  // ---- سجلات طب الأسنان العامة ----
+  handle('rec:list', (args) => {
+    requireAuth()
+    const { kind, patientId } = args as { kind: string; patientId?: number }
+    return listRecords(kind, patientId)
+  })
+  handle('rec:save', (args) => {
+    requireAuth('edit')
+    const { kind, data } = args as { kind: string; data: Record<string, unknown> }
+    if (!recordKindExists(kind)) throw new Error('نوع سجل غير معروف')
+    return saveRecord(kind, data)
+  })
+  handle('rec:delete', (args) => {
+    requireAuth('edit')
+    const { kind, id } = args as { kind: string; id: number }
+    if (!recordKindExists(kind)) throw new Error('نوع سجل غير معروف')
+    deleteRecord(kind, id)
     return true
   })
 
@@ -656,6 +680,41 @@ export function registerIpc(ipc: IpcMain): void {
     const meds = (file.medications ?? []).filter((m) => ids.includes(m.id))
     const html = buildPrescriptionHtml(file, settings, meds, req.diagnosis ?? '', req.note ?? '')
     return printHtml(html, settings.printer_name || undefined, 'A5')
+  })
+
+  // ---- طباعة مستند عام (تعليمات، تعليم مرضى، موافقة، تعقيم) ----
+  handle('printing:document', async (args) => {
+    const { title, subtitle, content, patientName } = args as {
+      title: string
+      subtitle?: string
+      content: string
+      patientName?: string
+    }
+    requireAuth()
+    const settings = getSettings()
+    const esc = escapeHtml
+    const body = esc(content).replace(/\n/g, '<br/>')
+    const html = `<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8"/>
+<style>
+  body{font-family:'Segoe UI',Tahoma,Arial,sans-serif;color:#111;margin:24px}
+  .head{text-align:center;border-bottom:2px solid #0f766e;padding-bottom:10px;margin-bottom:16px}
+  .head h1{margin:0;font-size:20px}
+  .head .sub{color:#555;font-size:13px;margin-top:4px}
+  .title{font-size:18px;font-weight:700;margin:12px 0 4px;color:#0f766e}
+  .patient{font-size:14px;margin-bottom:10px}
+  .content{font-size:14px;line-height:1.9;white-space:normal}
+  .foot{margin-top:32px;border-top:1px solid #ccc;padding-top:8px;font-size:12px;color:#666;text-align:center}
+</style></head><body>
+  <div class="head"><h1>${esc(settings.clinic_name || 'عيادة الأسنان')}</h1>
+  ${settings.clinic_address ? `<div class="sub">${esc(settings.clinic_address)}</div>` : ''}
+  ${settings.clinic_phone ? `<div class="sub">هاتف: ${esc(settings.clinic_phone)}</div>` : ''}</div>
+  <div class="title">${esc(title)}</div>
+  ${subtitle ? `<div class="sub">${esc(subtitle)}</div>` : ''}
+  ${patientName ? `<div class="patient">المريض: ${esc(patientName)} &nbsp; التاريخ: ${new Date().toLocaleDateString('en-GB')}</div>` : ''}
+  <div class="content">${body}</div>
+  ${settings.receipt_footer ? `<div class="foot">${esc(settings.receipt_footer)}</div>` : ''}
+</body></html>`
+    return printHtml(html, settings.printer_name || undefined, 'A4')
   })
 
   // ---- Excel export / import / template ----

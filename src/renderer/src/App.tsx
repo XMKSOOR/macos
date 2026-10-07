@@ -11,6 +11,7 @@ import Expenses from './screens/Expenses'
 import UsersScreen from './screens/Users'
 import SettingsScreen from './screens/Settings'
 import Finances from './screens/Finances'
+import Dental from './screens/Dental'
 import type { ScreenKey, Settings, User } from './lib'
 import { setCurrentPerms, toLatinDigits } from './lib'
 
@@ -23,6 +24,7 @@ const NAV: { key: ScreenKey; label: string; icon: string; adminOnly?: boolean }[
   { key: 'inventory', label: 'المخزون', icon: '📦' },
   { key: 'expenses', label: 'المصاريف', icon: '💸' },
   { key: 'finances', label: 'الجِدوى المالية', icon: '📈' },
+  { key: 'dental', label: 'طب الأسنان', icon: '🦷' },
   { key: 'users', label: 'المستخدمون', icon: '🔐', adminOnly: true },
   { key: 'settings', label: 'الإعدادات', icon: '⚙️', adminOnly: true }
 ]
@@ -36,6 +38,7 @@ const TITLES: Record<ScreenKey, string> = {
   inventory: 'المخزون والمواد',
   expenses: 'المصاريف',
   finances: 'الجِدوى المالية (استرداد رأس المال)',
+  dental: 'طب الأسنان — القوالب والرسوم والتعقيم والتذكيرات',
   users: 'المستخدمون والأدوار',
   settings: 'الإعدادات'
 }
@@ -162,6 +165,7 @@ export default function App(): React.JSX.Element {
           {screen === 'inventory' && <Inventory settings={settings} role={user.role} />}
           {screen === 'expenses' && <Expenses settings={settings} role={user.role} />}
           {screen === 'finances' && <Finances settings={settings} />}
+          {screen === 'dental' && <Dental />}
           {screen === 'users' && <UsersScreen currentUser={user} onSaved={refreshUser} />}
           {screen === 'settings' && <SettingsScreen settings={settings} onSaved={refreshSettings} onLogout={handleLogout} />}
         </div>

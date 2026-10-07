@@ -3,22 +3,90 @@ import { useToast } from '../ui'
 import type { PatientAttachment, ToothCondition, DentalChartEntry, PeriodontalChartEntry } from '../lib'
 
 const CONDITIONS: { value: ToothCondition; label: string; color: string; short: string }[] = [
-  { value: 'healthy', label: 'سليم', color: '#ffffff', short: 'سليم' },
-  { value: 'caries', label: 'تسوس', color: '#fca5a5', short: 'تسوس' },
-  { value: 'filling', label: 'حشوة', color: '#93c5fd', short: 'حشوة' },
-  { value: 'crown', label: 'تاج', color: '#fcd34d', short: 'تاج' },
-  { value: 'root_canal', label: 'علاج عصب', color: '#5eead4', short: 'عصب' },
-  { value: 'implant', label: 'زراعة', color: '#c4b5fd', short: 'زراعة' },
-  { value: 'fracture', label: 'كسر', color: '#fdba74', short: 'كسر' },
-  { value: 'sealant', label: 'حشوة وقائية', color: '#86efac', short: 'وقائي' },
-  { value: 'missing', label: 'مفقود', color: '#e2e8f0', short: 'مفقود' },
-  { value: 'extracted', label: 'مقلوع', color: '#94a3b8', short: 'مقلوع' }
+  { value: 'healthy', label: 'سليم', color: '#e2e8f0', short: 'سليم' },
+  { value: 'caries', label: 'تسوس', color: '#ef4444', short: 'تسوس' },
+  { value: 'filling', label: 'حشوة', color: '#3b82f6', short: 'حشوة' },
+  { value: 'crown', label: 'تاج', color: '#f59e0b', short: 'تاج' },
+  { value: 'root_canal', label: 'علاج عصب', color: '#14b8a6', short: 'عصب' },
+  { value: 'implant', label: 'زراعة', color: '#8b5cf6', short: 'زراعة' },
+  { value: 'fracture', label: 'كسر', color: '#f97316', short: 'كسر' },
+  { value: 'sealant', label: 'حشوة وقائية', color: '#22c55e', short: 'وقائي' },
+  { value: 'missing', label: 'مفقود', color: '#94a3b8', short: 'مفقود' },
+  { value: 'extracted', label: 'مقلوع', color: '#64748b', short: 'مقلوع' }
 ]
+
+const SURFACE_LABEL: Record<string, string> = { M: 'أنسي', D: 'وحشي', O: 'إطباقي', B: 'دهليزي', L: 'لساني' }
 
 const UPPER_RIGHT = ['18', '17', '16', '15', '14', '13', '12', '11']
 const UPPER_LEFT = ['21', '22', '23', '24', '25', '26', '27', '28']
 const LOWER_RIGHT = ['48', '47', '46', '45', '44', '43', '42', '41']
 const LOWER_LEFT = ['31', '32', '33', '34', '35', '36', '37', '38']
+
+function conditionColor(condition: string | undefined): string {
+  return CONDITIONS.find((c) => c.value === condition)?.color ?? '#e2e8f0'
+}
+
+function Thumb({ id }: { id: number }): React.JSX.Element {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    let alive = true
+    window.clinic.attachments
+      .read(id)
+      .then((r) => {
+        if (alive) setUrl(r.dataUrl)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [id])
+  return url ? <img src={url} alt="" /> : <span className="odo-loading">…</span>
+}
+
+function ToothCell({
+  tooth,
+  entry,
+  selected,
+  onSelect
+}: {
+  tooth: string
+  entry?: DentalChartEntry
+  selected: boolean
+  onSelect: (tooth: string) => void
+}): React.JSX.Element {
+  const cond = entry?.condition ?? 'healthy'
+  const hasCond = !!entry && cond !== 'healthy'
+  const surf = (entry?.surfaces ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  const color = conditionColor(cond)
+  const region = (key: string): string => {
+    if (!hasCond) return '#eef2f6'
+    if (surf.length === 0) return color
+    return surf.includes(key) ? color : '#eef2f6'
+  }
+  const short = CONDITIONS.find((c) => c.value === cond)?.short ?? ''
+  const label = CONDITIONS.find((c) => c.value === cond)?.label ?? 'سليم'
+  return (
+    <button
+      type="button"
+      className={`odo-tooth ${selected ? 'sel' : ''}`}
+      onClick={() => onSelect(tooth)}
+      title={`السن ${tooth} — ${label}`}
+      style={hasCond ? { outlineColor: color } : undefined}
+    >
+      <span className="odo-num">{tooth}</span>
+      <span className="odo-grid">
+        <i className="odo-region rg-b" style={{ background: region('B') }} title={SURFACE_LABEL.B} />
+        <i className="odo-region rg-m" style={{ background: region('M') }} title={SURFACE_LABEL.M} />
+        <i className="odo-region rg-o" style={{ background: region('O') }} title={SURFACE_LABEL.O}>
+          {hasCond && <span className="odo-center">{short}</span>}
+        </i>
+        <i className="odo-region rg-d" style={{ background: region('D') }} title={SURFACE_LABEL.D} />
+        <i className="odo-region rg-l" style={{ background: region('L') }} title={SURFACE_LABEL.L} />
+      </span>
+      {hasCond && (cond === 'missing' || cond === 'extracted') && <span className="odo-x">✕</span>}
+    </button>
+  )
+}
 
 export default function Odontogram({
   patientId,
@@ -32,7 +100,7 @@ export default function Odontogram({
   const toast = useToast()
   const [entries, setEntries] = useState<DentalChartEntry[]>([])
   const [perio, setPerio] = useState<PeriodontalChartEntry[]>([])
-  const [selected, setSelected] = useState<string>('')
+  const [selected, setSelected] = useState('')
   const [condition, setCondition] = useState<ToothCondition>('healthy')
   const [surfaces, setSurfaces] = useState<string[]>([])
   const [notes, setNotes] = useState('')
@@ -57,16 +125,13 @@ export default function Odontogram({
     load()
   }, [load])
 
-  const entryFor = (tooth: string): DentalChartEntry | undefined => entries.find((e) => e.tooth_number === tooth)
-  const perioFor = (tooth: string): PeriodontalChartEntry | undefined => perio.find((e) => e.tooth_number === tooth)
-
   const selectTooth = (tooth: string): void => {
     setSelected(tooth)
-    const e = entryFor(tooth)
+    const e = entries.find((x) => x.tooth_number === tooth)
     setCondition(e?.condition ?? 'healthy')
     setSurfaces((e?.surfaces ?? '').split(',').map((s) => s.trim()).filter(Boolean))
     setNotes(e?.notes ?? '')
-    const p = perioFor(tooth)
+    const p = perio.find((x) => x.tooth_number === tooth)
     setPd(p?.pocket_depth ?? 0)
     setBleeding(p?.bleeding ?? 0)
     setMobility(p?.mobility ?? 0)
@@ -114,10 +179,7 @@ export default function Odontogram({
       .catch((e) => toast(e.message, 'error'))
   }
 
-  const linked = useMemo(
-    () => attachments.filter((a) => a.tooth_number === selected),
-    [attachments, selected]
-  )
+  const linked = useMemo(() => attachments.filter((a) => a.tooth_number === selected), [attachments, selected])
   const unlinked = attachments.filter((a) => !a.tooth_number && (a.ftype === 'image' || a.ftype === 'dicom'))
 
   const linkAttachment = (id: number): void => {
@@ -151,47 +213,6 @@ export default function Odontogram({
       .catch((e) => toast(e.message, 'error'))
   }
 
-  const renderTeeth = (teeth: string[]): React.JSX.Element[] =>
-    teeth.map((t) => (
-      <button
-        key={t}
-        type="button"
-        className={`odo-tooth ${selected === t ? 'sel' : ''} ${isMissing(t) ? 'missing' : ''}`}
-        style={{ background: colorFor(t) }}
-        onClick={() => selectTooth(t)}
-        title={labelFor(t)}
-      >
-        <span className="odo-num">{t}</span>
-        <span className="odo-short">{shortFor(t)}</span>
-        {surfaceMarks(t) && <span className="odo-surf">{surfaceMarks(t)}</span>}
-      </button>
-    ))
-
-  const colorFor = (t: string): string => {
-    const e = entryFor(t)
-    if (!e) return '#ffffff'
-    return CONDITIONS.find((c) => c.value === e.condition)?.color ?? '#ffffff'
-  }
-  const shortFor = (t: string): string => {
-    const e = entryFor(t)
-    if (!e || e.condition === 'healthy') return ''
-    return CONDITIONS.find((c) => c.value === e.condition)?.short ?? ''
-  }
-  const surfaceMarks = (t: string): string => {
-    const e = entryFor(t)
-    if (!e || !e.surfaces) return ''
-    return e.surfaces.split(',').filter(Boolean).join('')
-  }
-  const isMissing = (t: string): boolean => {
-    const e = entryFor(t)
-    return e?.condition === 'missing' || e?.condition === 'extracted'
-  }
-  const labelFor = (t: string): string => {
-    const e = entryFor(t)
-    const cond = e ? CONDITIONS.find((c) => c.value === e.condition)?.label : 'سليم'
-    return `السن ${t} — ${cond ?? ''}`
-  }
-
   return (
     <div className="odontogram">
       <div className="odo-legend">
@@ -204,15 +225,23 @@ export default function Odontogram({
 
       <div className="odo-chart" dir="ltr">
         <div className="odo-row">
-          {renderTeeth(UPPER_RIGHT)}
+          {UPPER_RIGHT.map((t) => (
+            <ToothCell key={t} tooth={t} entry={entries.find((e) => e.tooth_number === t)} selected={selected === t} onSelect={selectTooth} />
+          ))}
           <span className="odo-gap" />
-          {renderTeeth(UPPER_LEFT)}
+          {UPPER_LEFT.map((t) => (
+            <ToothCell key={t} tooth={t} entry={entries.find((e) => e.tooth_number === t)} selected={selected === t} onSelect={selectTooth} />
+          ))}
         </div>
         <div className="odo-midline" />
         <div className="odo-row">
-          {renderTeeth(LOWER_RIGHT)}
+          {LOWER_RIGHT.map((t) => (
+            <ToothCell key={t} tooth={t} entry={entries.find((e) => e.tooth_number === t)} selected={selected === t} onSelect={selectTooth} />
+          ))}
           <span className="odo-gap" />
-          {renderTeeth(LOWER_LEFT)}
+          {LOWER_LEFT.map((t) => (
+            <ToothCell key={t} tooth={t} entry={entries.find((e) => e.tooth_number === t)} selected={selected === t} onSelect={selectTooth} />
+          ))}
         </div>
       </div>
 
@@ -252,14 +281,17 @@ export default function Odontogram({
           </div>
 
           <div className="odo-section">
-            <div className="odo-section-title">الأسطح المصابة</div>
+            <div className="odo-section-title">
+              الأسطح المصابة {surfaces.length === 0 ? '(عند تركها فارغة تُلوَّن كافة الأسطح)' : ''}
+            </div>
             <div className="odo-surfaces">
-              {['M', 'D', 'O', 'B', 'L'].map((s) => (
+              {(['M', 'D', 'O', 'B', 'L'] as string[]).map((s) => (
                 <button
                   key={s}
                   type="button"
                   className={`odo-surface ${surfaces.includes(s) ? 'active' : ''}`}
                   onClick={() => toggleSurface(s)}
+                  title={SURFACE_LABEL[s]}
                 >
                   {s}
                 </button>
@@ -302,14 +334,22 @@ export default function Odontogram({
 
           <div className="odo-section">
             <div className="odo-section-title">صور الأشعة المرتبطة بهذا السن ({linked.length})</div>
-            <div className="flex" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div className="odo-links">
               {linked.map((a) => (
-                <span key={a.id} className="odo-chip">
-                  {a.ftype === 'dicom' ? '🦴' : '🖼️'} {a.filename}
-                  <button className="ghost small" onClick={() => unlinkAttachment(a.id)}>
-                    فصل
-                  </button>
-                </span>
+                <div key={a.id} className="odo-link-card">
+                  <div className="odo-link-thumb">
+                    {a.ftype === 'image' ? <Thumb id={a.id} /> : <span>{a.ftype === 'dicom' ? '🦴 DICOM' : '📄'}</span>}
+                  </div>
+                  <div className="odo-link-name">{a.filename}</div>
+                  <div className="odo-link-actions">
+                    <button className="ghost small" onClick={() => window.clinic.attachments.openExternal(a.id)}>
+                      فتح
+                    </button>
+                    <button className="ghost small" onClick={() => unlinkAttachment(a.id)}>
+                      فصل
+                    </button>
+                  </div>
+                </div>
               ))}
               {linked.length === 0 && <span className="muted">لا توجد صور مرتبطة</span>}
             </div>

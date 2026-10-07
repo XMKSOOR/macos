@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Modal, Field, Empty, CurrencyCell, Confirm, useToast } from '../ui'
 import type { PatientFileResult, PatientAttachment, Medication, MedicationInput, Medicine } from '../lib'
 import AttachmentViewer from '../AttachmentViewer'
-import Odontogram from './Odontogram'
-import TreatmentPlans from './TreatmentPlans'
+import DentalRecord from './DentalRecord'
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} بايت`
@@ -643,20 +642,19 @@ export default function PatientFile({
 
             <div className="panel" style={{ gridColumn: '1 / -1' }}>
               <div className="panel-head">
-                <h2>7. مخطط الأسنان (Odontogram)</h2>
-                <span className="muted">تحديد حالة كل سن والأسطح المصابة وربط صور الأشعة</span>
+                <h2>7. سجل طب الأسنان الشامل</h2>
+                <span className="muted">
+                  المخطط، خطط العلاج، سجل الأسنان، اللثة، الأشعة، التخدير، المختبر، الزراعة، الموافقات، المخاطر، الإحالات، التذكيرات
+                </span>
               </div>
               <div className="panel-body">
-                <Odontogram patientId={id} attachments={attachments} onAttachmentsChanged={reloadAttachments} />
-              </div>
-            </div>
-
-            <div className="panel" style={{ gridColumn: '1 / -1' }}>
-              <div className="panel-head">
-                <h2>8. خطط العلاج</h2>
-              </div>
-              <div className="panel-body">
-                <TreatmentPlans patientId={id} rate={rate} />
+                <DentalRecord
+                  patientId={id}
+                  patientName={form?.name ?? ''}
+                  rate={rate}
+                  attachments={attachments}
+                  onAttachmentsChanged={reloadAttachments}
+                />
               </div>
             </div>
           </div>
