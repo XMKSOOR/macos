@@ -20,7 +20,16 @@ import type {
   SheetExportRequest,
   SheetSchemaKey,
   StockMovement,
-  User
+  User,
+  DentalChartEntry,
+  ToothCondition,
+  TreatmentPlan,
+  TreatmentPlanItem,
+  TreatmentPlanStatus,
+  PeriodontalChartEntry,
+  ProcedureTemplate,
+  RecallReminder,
+  RecallType
 } from '../shared/types'
 
 function invoke<T>(channel: string, args?: unknown): Promise<T> {
@@ -64,7 +73,8 @@ const api = {
     read: (id: number): Promise<{ attachment: PatientAttachment; dataUrl: string }> =>
       invoke('attachments:read', { id }),
     delete: (id: number): Promise<boolean> => invoke('attachments:delete', { id }),
-    openExternal: (id: number): Promise<boolean> => invoke('attachments:openExternal', { id })
+    openExternal: (id: number): Promise<boolean> => invoke('attachments:openExternal', { id }),
+    setTooth: (id: number, toothNumber: string): Promise<boolean> => invoke('attachments:setTooth', { id, toothNumber })
   },
   medications: {
     list: (patientId: number): Promise<Medication[]> => invoke('medications:list', { patientId }),
@@ -121,6 +131,43 @@ const api = {
   },
   dashboard: {
     stats: (period: string): Promise<DashboardStats> => invoke('dashboard:stats', { period })
+  },
+  dental: {
+    listChart: (patientId: number): Promise<DentalChartEntry[]> => invoke('dental:listChart', { patientId }),
+    saveTooth: (patientId: number, toothNumber: string, condition: ToothCondition, surfaces: string, notes: string): Promise<void> =>
+      invoke('dental:saveTooth', { patientId, toothNumber, condition, surfaces, notes }),
+    deleteTooth: (patientId: number, toothNumber: string): Promise<void> => invoke('dental:deleteTooth', { patientId, toothNumber })
+  },
+  plans: {
+    list: (patientId: number): Promise<TreatmentPlan[]> => invoke('plans:list', { patientId }),
+    create: (patientId: number, title: string, notes: string): Promise<TreatmentPlan> => invoke('plans:create', { patientId, title, notes }),
+    update: (id: number, title: string, status: TreatmentPlanStatus, notes: string): Promise<boolean> =>
+      invoke('plans:update', { id, title, status, notes }),
+    delete: (id: number): Promise<boolean> => invoke('plans:delete', { id }),
+    addItem: (planId: number, toothNumber: string, procedureName: string, cost: number, notes: string): Promise<void> =>
+      invoke('plans:addItem', { planId, toothNumber, procedureName, cost, notes }),
+    updateItem: (id: number, status: TreatmentPlanItem['status'], cost: number): Promise<void> =>
+      invoke('plans:updateItem', { id, status, cost }),
+    deleteItem: (id: number): Promise<void> => invoke('plans:deleteItem', { id })
+  },
+  periodontal: {
+    list: (patientId: number): Promise<PeriodontalChartEntry[]> => invoke('periodontal:list', { patientId }),
+    save: (patientId: number, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): Promise<void> =>
+      invoke('periodontal:save', { patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes }),
+    delete: (patientId: number, toothNumber: string): Promise<void> => invoke('periodontal:delete', { patientId, toothNumber })
+  },
+  procedureTemplates: {
+    list: (): Promise<ProcedureTemplate[]> => invoke('procedureTemplates:list'),
+    create: (t: Omit<ProcedureTemplate, 'id' | 'created_at'>): Promise<ProcedureTemplate> => invoke('procedureTemplates:create', t),
+    update: (id: number, data: Omit<ProcedureTemplate, 'id' | 'created_at'>): Promise<boolean> => invoke('procedureTemplates:update', { id, data }),
+    delete: (id: number): Promise<boolean> => invoke('procedureTemplates:delete', { id })
+  },
+  recall: {
+    list: (): Promise<RecallReminder[]> => invoke('recall:list'),
+    create: (patientId: number, recallType: RecallType, dueDate: string, notes: string): Promise<RecallReminder> =>
+      invoke('recall:create', { patientId, recallType, dueDate, notes }),
+    complete: (id: number): Promise<boolean> => invoke('recall:complete', { id }),
+    delete: (id: number): Promise<boolean> => invoke('recall:delete', { id })
   },
   printing: {
     list: (): Promise<PrinterInfo[]> => invoke('printing:list'),

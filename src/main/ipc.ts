@@ -49,6 +49,28 @@ import {
   listPatients,
   listStockMovements,
   listUsers,
+  listDentalCharts,
+  saveDentalChart,
+  deleteDentalChart,
+  listTreatmentPlans,
+  createTreatmentPlan,
+  updateTreatmentPlan,
+  deleteTreatmentPlan,
+  addTreatmentPlanItem,
+  updateTreatmentPlanItem,
+  deleteTreatmentPlanItem,
+  listPeriodontalCharts,
+  savePeriodontalChart,
+  deletePeriodontalChart,
+  listProcedureTemplates,
+  createProcedureTemplate,
+  updateProcedureTemplate,
+  deleteProcedureTemplate,
+  listRecallReminders,
+  createRecallReminder,
+  completeRecallReminder,
+  deleteRecallReminder,
+  setPatientFileTooth,
   nextInvoiceNo,
   saveSettings,
   updateAppointment,
@@ -79,7 +101,16 @@ import type {
   Settings,
   SheetExportRequest,
   SheetSchemaKey,
-  User
+  User,
+  DentalChartEntry,
+  ToothCondition,
+  TreatmentPlan,
+  TreatmentPlanItem,
+  TreatmentPlanStatus,
+  PeriodontalChartEntry,
+  ProcedureTemplate,
+  RecallReminder,
+  RecallType
 } from '../shared/types'
 import { can } from '../shared/types'
 import { applyCurrencyScale, backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
@@ -299,6 +330,159 @@ export function registerIpc(ipc: IpcMain): void {
     const row = getPatientFileRecord((args as { id: number }).id)
     const err = await shell.openPath(attachmentPath(row))
     if (err) throw new Error(err)
+    return true
+  })
+  handle('attachments:setTooth', (args) => {
+    requireAuth('edit')
+    const { id, toothNumber } = args as { id: number; toothNumber: string }
+    setPatientFileTooth(id, toothNumber ?? '')
+    return true
+  })
+
+  // ---- مخطط الأسنان (Odontogram) ----
+  handle('dental:listChart', (args) => {
+    requireAuth()
+    return listDentalCharts((args as { patientId: number }).patientId)
+  })
+  handle('dental:saveTooth', (args) => {
+    requireAuth('edit')
+    const { patientId, toothNumber, condition, surfaces, notes } = args as {
+      patientId: number
+      toothNumber: string
+      condition: ToothCondition
+      surfaces: string
+      notes: string
+    }
+    saveDentalChart(patientId, toothNumber, condition, surfaces, notes)
+    return true
+  })
+  handle('dental:deleteTooth', (args) => {
+    requireAuth('edit')
+    const { patientId, toothNumber } = args as { patientId: number; toothNumber: string }
+    deleteDentalChart(patientId, toothNumber)
+    return true
+  })
+
+  // ---- خطط العلاج ----
+  handle('plans:list', (args): TreatmentPlan[] => {
+    requireAuth()
+    return listTreatmentPlans((args as { patientId: number }).patientId)
+  })
+  handle('plans:create', (args) => {
+    requireAuth('edit')
+    const { patientId, title, notes } = args as { patientId: number; title: string; notes: string }
+    return createTreatmentPlan(patientId, title, notes)
+  })
+  handle('plans:update', (args) => {
+    requireAuth('edit')
+    const { id, title, status, notes } = args as {
+      id: number
+      title: string
+      status: TreatmentPlanStatus
+      notes: string
+    }
+    updateTreatmentPlan(id, title, status, notes)
+    return true
+  })
+  handle('plans:delete', (args) => {
+    requireAuth('edit')
+    deleteTreatmentPlan((args as { id: number }).id)
+    return true
+  })
+  handle('plans:addItem', (args) => {
+    requireAuth('edit')
+    const { planId, toothNumber, procedureName, cost, notes } = args as {
+      planId: number
+      toothNumber: string
+      procedureName: string
+      cost: number
+      notes: string
+    }
+    addTreatmentPlanItem(planId, toothNumber, procedureName, cost, notes)
+    return true
+  })
+  handle('plans:updateItem', (args) => {
+    requireAuth('edit')
+    const { id, status, cost } = args as { id: number; status: TreatmentPlanItem['status']; cost: number }
+    updateTreatmentPlanItem(id, status, cost)
+    return true
+  })
+  handle('plans:deleteItem', (args) => {
+    requireAuth('edit')
+    deleteTreatmentPlanItem((args as { id: number }).id)
+    return true
+  })
+
+  // ---- قياسات اللثة ----
+  handle('periodontal:list', (args) => {
+    requireAuth()
+    return listPeriodontalCharts((args as { patientId: number }).patientId)
+  })
+  handle('periodontal:save', (args) => {
+    requireAuth('edit')
+    const { patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes } = args as {
+      patientId: number
+      toothNumber: string
+      pocketDepth: number
+      bleeding: number
+      mobility: number
+      recession: number
+      notes: string
+    }
+    savePeriodontalChart(patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes)
+    return true
+  })
+  handle('periodontal:delete', (args) => {
+    requireAuth('edit')
+    const { patientId, toothNumber } = args as { patientId: number; toothNumber: string }
+    deletePeriodontalChart(patientId, toothNumber)
+    return true
+  })
+
+  // ---- قوالب الإجراءات ----
+  handle('procedureTemplates:list', (): ProcedureTemplate[] => {
+    requireAuth()
+    return listProcedureTemplates()
+  })
+  handle('procedureTemplates:create', (args) => {
+    requireAuth('edit')
+    return createProcedureTemplate(args as Omit<ProcedureTemplate, 'id' | 'created_at'>)
+  })
+  handle('procedureTemplates:update', (args) => {
+    requireAuth('edit')
+    const { id, data } = args as { id: number; data: Omit<ProcedureTemplate, 'id' | 'created_at'> }
+    updateProcedureTemplate(id, data)
+    return true
+  })
+  handle('procedureTemplates:delete', (args) => {
+    requireAuth('edit')
+    deleteProcedureTemplate((args as { id: number }).id)
+    return true
+  })
+
+  // ---- تذكيرات المراجعة (Recall) ----
+  handle('recall:list', (): RecallReminder[] => {
+    requireAuth()
+    return listRecallReminders()
+  })
+  handle('recall:create', (args) => {
+    requireAuth('edit')
+    const { patientId, recallType, dueDate, notes } = args as {
+      patientId: number
+      recallType: RecallType
+      dueDate: string
+      notes: string
+    }
+    return createRecallReminder(patientId, recallType, dueDate, notes)
+  })
+  handle('recall:complete', (args) => {
+    requireAuth('edit')
+    completeRecallReminder((args as { id: number }).id)
+    return true
+  })
+  handle('recall:delete', (args) => {
+    requireAuth('edit')
+    deleteRecallReminder((args as { id: number }).id)
     return true
   })
 

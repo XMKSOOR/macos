@@ -220,6 +220,7 @@ CREATE TABLE IF NOT EXISTS patient_files (
   ftype TEXT NOT NULL DEFAULT 'other',
   mime TEXT NOT NULL DEFAULT '',
   size INTEGER NOT NULL DEFAULT 0,
+  tooth_number TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
@@ -324,8 +325,10 @@ CREATE TABLE IF NOT EXISTS recall_reminders (
 `)
   ensureCurrencyColumns()
   ensurePatientColumns()
+  ensurePatientFileColumns()
   seed()
   seedMedicines()
+  seedProcedureTemplates()
   recalcUsd()
 }
 
@@ -342,6 +345,14 @@ function ensurePatientColumns(): void {
   add('chronic_diseases', "TEXT NOT NULL DEFAULT ''")
   add('physiological_status', "TEXT NOT NULL DEFAULT ''")
   add('medical_notes', "TEXT NOT NULL DEFAULT ''")
+}
+
+/** عمود ربط صورة الأشعة/المرفق بسنّ معيّن (يُضاف للقواعد القديمة عند الترقية) */
+function ensurePatientFileColumns(): void {
+  const exists = db
+    .prepare("SELECT name FROM pragma_table_info('patient_files') WHERE name=?")
+    .get('tooth_number') as { name: string } | undefined
+  if (!exists) db.exec("ALTER TABLE patient_files ADD COLUMN tooth_number TEXT NOT NULL DEFAULT ''")
 }
 
 // ---- العملة المزدوجة (ليرة/دولار) وحذف الأصفار ----
@@ -817,6 +828,45 @@ function seedMedicines(): void {
   }
 }
 
+/** قوالب الإجراءات الشائعة (تُزرع مرة واحدة) */
+function seedProcedureTemplates(): void {
+  const row = db.prepare('SELECT COUNT(*) AS c FROM procedure_templates').get() as { c: number }
+  if (Number(row?.c ?? 0) > 0) return
+  const SEED: { name: string; category: string; cost: number; materials: string }[] = [
+    { name: 'فحص وتشخيص', category: 'تشخيص', cost: 0, materials: '' },
+    { name: 'صورة أشعة (بريو أبيكال)', category: 'تشخيص', cost: 0, materials: '' },
+    { name: 'صورة أشعة بانورامية', category: 'تشخيص', cost: 0, materials: '' },
+    { name: 'تنظيف وإزالة الجير', category: 'وقائي', cost: 0, materials: '' },
+    { name: 'حشوة وقائية (Sealant)', category: 'وقائي', cost: 0, materials: '' },
+    { name: 'فلورايد موضعي', category: 'وقائي', cost: 0, materials: '' },
+    { name: 'حشوة كومبوزيت', category: 'ترميمي', cost: 0, materials: 'كومبوزيت، بوندينج' },
+    { name: 'حشوة أمالغم', category: 'ترميمي', cost: 0, materials: 'أمالغم' },
+    { name: 'إعادة ترميم حشوة', category: 'ترميمي', cost: 0, materials: '' },
+    { name: 'علاج عصب (قناة جذر)', category: 'لبّي', cost: 0, materials: 'مبارد، جوتا بيركا' },
+    { name: 'إعادة علاج عصب', category: 'لبّي', cost: 0, materials: '' },
+    { name: 'خلع بسيط', category: 'جراحي', cost: 0, materials: 'تخدير موضعي' },
+    { name: 'خلع جراحي (ضرس عقل)', category: 'جراحي', cost: 0, materials: 'تخدير، خيوط' },
+    { name: 'تاج زيركون', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'تاج بورسلين/معدن', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'جسر ثابت', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'زراعة سن', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'طقم جزئي', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'طقم كامل', category: 'تعويضي', cost: 0, materials: '' },
+    { name: 'علاج لثة (تقليح وتنعيم الجذور)', category: 'لثة', cost: 0, materials: '' },
+    { name: 'تبييض الأسنان', category: 'تجميلي', cost: 0, materials: 'جل تبييض' },
+    { name: 'تركيب تقويم', category: 'تقويم', cost: 0, materials: '' }
+  ]
+  const stmt = db.prepare('INSERT INTO procedure_templates (name, category, default_cost, materials) VALUES (?,?,?,?)')
+  db.prepare('BEGIN').run()
+  try {
+    for (const t of SEED) stmt.run(t.name, t.category, t.cost, t.materials)
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+}
+
 export function listMedicines(): Medicine[] {
   return db.prepare('SELECT * FROM medicines ORDER BY category, trade_name').all() as unknown as Medicine[]
 }
@@ -904,8 +954,16 @@ export function addPatientFile(patientId: number, srcPath: string): PatientAttac
     ftype,
     mime,
     size,
+    tooth_number: '',
     created_at: new Date().toISOString()
   }
+}
+
+/** ربط مرفق (صورة أشعة) بسنّ معيّن أو بمنطقة عامة */
+export function setPatientFileTooth(id: number, toothNumber: string): void {
+  const row = db.prepare('SELECT id FROM patient_files WHERE id=?').get(id)
+  if (!row) throw new Error('المرفق غير موجود')
+  db.prepare('UPDATE patient_files SET tooth_number=? WHERE id=?').run(toothNumber, id)
 }
 
 /** يقرأ الملف من القرص ويعيده كـ data URL لعرضه داخل البرنامج */

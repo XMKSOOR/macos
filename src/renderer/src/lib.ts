@@ -18,7 +18,17 @@ InvoiceItem,
   Recurrence,
   Settings,
   StockMovement,
-  User
+  User,
+  DentalChartEntry,
+  ToothCondition,
+  ToothSurface,
+  TreatmentPlan,
+  TreatmentPlanItem,
+  TreatmentPlanStatus,
+  PeriodontalChartEntry,
+  ProcedureTemplate,
+  RecallReminder,
+  RecallType
 } from '@shared/types'
 import type { PermissionKey, PermissionOverride, Role, SheetSchemaKey } from '@shared/types'
 import { can as baseCan } from '@shared/types'
@@ -47,7 +57,16 @@ export type {
   Settings,
   SheetSchemaKey,
   StockMovement,
-  User
+  User,
+  DentalChartEntry,
+  ToothCondition,
+  TreatmentPlan,
+  TreatmentPlanItem,
+  TreatmentPlanStatus,
+  PeriodontalChartEntry,
+  ProcedureTemplate,
+  RecallReminder,
+  RecallType
 }
 
 let permOverride: PermissionOverride = {}

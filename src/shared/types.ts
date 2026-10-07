@@ -182,6 +182,8 @@ export interface PatientAttachment {
   ftype: 'dicom' | 'image' | 'other'
   mime: string
   size: number
+  /** رقم السن المرتبط (نظام FDI) أو 'region' لمنطقة عامة أو '' إن لم يُربط */
+  tooth_number: string
   created_at: string
 }
 
