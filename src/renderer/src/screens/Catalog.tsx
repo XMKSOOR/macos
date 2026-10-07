@@ -4,7 +4,7 @@ import DataGrid from '../table'
 import type { Col } from '../table'
 import ExcelBar from '../excel'
 import type { CatalogItem, Material, Role, Settings } from '../lib'
-import { can, fmt, toLatinDigits } from '../lib'
+import { can, fmt, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 interface BomLine {
@@ -289,10 +289,9 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
                     ))}
                   </select>
                   <input
-                    type="number" dir="ltr" inputMode="decimal"
-                    min={1}
+                    type="text" dir="ltr" inputMode="decimal"
                     value={l.qty}
-                    onChange={(e) => setLine(i, { qty: Math.max(1, Number(toLatinDigits(e.target.value)) || 1) })}
+                    onChange={(e) => setLine(i, { qty: Math.max(1, parseNumber(e.target.value) || 1) })}
                     placeholder="الكمية"
                   />
                   <div className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>

@@ -4,23 +4,26 @@ import DataGrid from '../table'
 import type { Col } from '../table'
 import ExcelBar from '../excel'
 import type { Material, Role, Settings, StockMovement } from '../lib'
-import { can, fmt, toLatinDigits } from '../lib'
+import { can, fmt } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
+import { NumberInput } from '../NumberInput'
 
 const cols: Col<Material>[] = [
-  { key: 'name', label: 'الاسم' },
-  { key: 'category', label: 'التصنيف' },
+  { key: 'name', label: 'الاسم', width: 180 },
+  { key: 'category', label: 'التصنيف', width: 120 },
   {
     key: 'quantity',
     label: 'الكمية',
-    type: 'display',
-    render: (m) => <span className={m.quantity <= m.min_qty && m.min_qty > 0 ? 'badge amber' : ''}>{`${m.quantity} ${m.unit}`}</span>
+    type: 'number',
+    width: 110,
+    editOnClick: true,
+    render: (m) => <span className={m.quantity <= m.min_qty && m.min_qty > 0 ? 'badge amber' : ''}>{`${fmt(m.quantity)} ${m.unit}`}</span>
   },
-  { key: 'min_qty', label: 'الحد الأدنى', type: 'number' },
-  { key: 'unit', label: 'الوحدة' },
-  { key: 'cost', label: 'الكلفة', type: 'money' },
-  { key: 'supplier', label: 'المورد' },
-  { key: 'notes', label: 'ملاحظات' }
+  { key: 'min_qty', label: 'الحد الأدنى', type: 'number', width: 100 },
+  { key: 'unit', label: 'الوحدة', width: 90 },
+  { key: 'cost', label: 'الكلفة', type: 'money', width: 180 },
+  { key: 'supplier', label: 'المورد', width: 140 },
+  { key: 'notes', label: 'ملاحظات', width: 160 }
 ]
 
 export default function Inventory({ settings, role }: { settings: Settings | null; role: Role }): React.JSX.Element {
@@ -121,6 +124,11 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
         notes: (patch.notes as string) ?? row.notes
       }
       await window.clinic.inventory.update(row.id, merged)
+      const targetQty = patch.quantity !== undefined ? Number(patch.quantity) : row.quantity
+      const delta = targetQty - row.quantity
+      if (delta) {
+        await window.clinic.inventory.adjust(row.id, delta, 'adjust', 'تعديل مباشر من الجدول')
+      }
       load(search)
     },
     [list, load, search]
@@ -207,6 +215,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               canEdit={canEdit}
               onSave={onRowSave}
               moneyRate={rate}
+              fixed
               emptyText="لا توجد مواد"
               actions={(m) => (
                 <>
@@ -287,6 +296,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
         <Modal
           title="مادة جديدة"
           onClose={() => setModal(false)}
+          wide
           footer={
             <>
               <button onClick={save}>إضافة</button>
@@ -304,10 +314,10 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
             </Field>
             <Field label="الكمية الافتتاحية">
-              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(toLatinDigits(e.target.value)) })} />
+              <NumberInput value={Number(form.quantity) || 0} onChange={(v) => setForm({ ...form, quantity: v })} />
             </Field>
             <Field label="الحد الأدنى">
-              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={form.min_qty} onChange={(e) => setForm({ ...form, min_qty: Number(toLatinDigits(e.target.value)) })} />
+              <NumberInput value={Number(form.min_qty) || 0} onChange={(v) => setForm({ ...form, min_qty: v })} />
             </Field>
             <Field label="الوحدة">
               <input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="علبة / حبة / ملم..." />
@@ -359,7 +369,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               <input value={adjusting.quantity} disabled />
             </Field>
             <Field label="التغيير (+ للزيادة / - للنقصان)">
-              <input type="number" dir="ltr" inputMode="decimal" step="0.01" value={adjQty} onChange={(e) => setAdjQty(Number(toLatinDigits(e.target.value)))} autoFocus />
+              <NumberInput value={adjQty} onChange={setAdjQty} allowNegative autoFocus />
             </Field>
             <Field label="ملاحظة">
               <input value={adjNote} onChange={(e) => setAdjNote(e.target.value)} />

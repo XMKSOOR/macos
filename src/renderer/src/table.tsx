@@ -1,7 +1,15 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Empty } from './ui'
-import { fmt, toLatinDigits } from './lib'
+import { fmt, sanitizeNumberInput } from './lib'
+
+/** يركّز الحقل دون أن يقوم المتصفح بالتمرير إليه (تفادي حركة الجدول). */
+function focusNoScroll(el: HTMLInputElement | null): void {
+  if (el && !el.dataset.focused) {
+    el.dataset.focused = '1'
+    el.focus({ preventScroll: true })
+  }
+}
 
 export interface Col<T> {
   key: string
@@ -10,6 +18,8 @@ export interface Col<T> {
   options?: { value: string | number; label: string }[]
   render?: (row: T) => ReactNode
   width?: number
+  /** فتح التعديل المباشر بنقرة واحدة على هذه الخانة */
+  editOnClick?: boolean
 }
 
 interface DataGridProps<T> {
@@ -24,6 +34,8 @@ interface DataGridProps<T> {
   className?: string
   /** سعر الصرف (ل.س لكل $) لتفعيل التعديل المباشر المزدوج في الخانات المالية ل.س/$ */
   moneyRate?: number
+  /** تثبيت عرض الأعمدة ومنع تحرّك الجدول عند الدخول في وضع التعديل */
+  fixed?: boolean
   /** عند تزويده، يتجاوز النقر المزدوج الافتراضي (التعديل المباشر) ويستدعي هذا الإجراء */
   onRowDoubleClick?: (row: T) => void
 }
@@ -45,6 +57,7 @@ export default function DataGrid<T>({
   emptyText,
   className,
   moneyRate,
+  fixed,
   onRowDoubleClick
 }: DataGridProps<T>): React.JSX.Element {
   const [editKey, setEditKey] = useState<number | string | null>(null)
@@ -122,14 +135,15 @@ export default function DataGrid<T>({
           return (
             <div className="inline-dual">
               <input
-                type="number"
-                step="1"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 className="inline-input"
                 dir="ltr"
                 value={dv}
+                ref={focusNoScroll}
                 onChange={(e) => {
-                  const next = { ...draft, [col.key]: e.target.value }
+                  const clean = sanitizeNumberInput(e.target.value)
+                  const next = { ...draft, [col.key]: clean }
                   if (draft[usdKey] !== undefined) delete next[usdKey]
                   setDraft(next)
                 }}
@@ -137,19 +151,17 @@ export default function DataGrid<T>({
                   if (e.key === 'Enter') void commit()
                   if (e.key === 'Escape') cancel()
                 }}
-                autoFocus
               />
               <span className="dual-unit">ل.س</span>
               <span className="dual-arrow">{'⟷'}</span>
               <input
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 className="inline-input"
                 dir="ltr"
                 value={usdDraft}
                 onChange={(e) => {
-                  const u = toLatinDigits(e.target.value.trim())
+                  const u = sanitizeNumberInput(e.target.value)
                   setDraft({ ...draft, [col.key]: u !== '' && Number.isFinite(Number(u)) ? String(Math.round(Number(u) * moneyRate!)) : '', [usdKey]: u })
                 }}
                 onKeyDown={(e) => {
@@ -163,15 +175,15 @@ export default function DataGrid<T>({
         }
         return (
           <input
-            type="number" dir="ltr" inputMode="decimal"
+            type="text" dir="ltr" inputMode="decimal"
             className="inline-input"
             value={draft[col.key] ?? ''}
-            onChange={(e) => setDraft({ ...draft, [col.key]: toLatinDigits(e.target.value) })}
+            ref={focusNoScroll}
+            onChange={(e) => setDraft({ ...draft, [col.key]: sanitizeNumberInput(e.target.value) })}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void commit()
               if (e.key === 'Escape') cancel()
             }}
-            autoFocus
           />
         )
       }
@@ -212,12 +224,12 @@ export default function DataGrid<T>({
             type="text"
             className="inline-input"
             value={draft[col.key] ?? ''}
+            ref={focusNoScroll}
             onChange={(e) => setDraft({ ...draft, [col.key]: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void commit()
               if (e.key === 'Escape') cancel()
             }}
-            autoFocus
           />
         )
     }
@@ -227,7 +239,7 @@ export default function DataGrid<T>({
     <div className={`table-wrap ${className ?? ''}`}>
       {toolbar && <div className="table-toolbar">{toolbar}</div>}
       {err && <div className="inline-err">{err}</div>}
-      <table className="data">
+      <table className={`data ${fixed ? 'fixed-cols' : ''}`}>
         <thead>
           <tr>
             {cols.map((c) => (
@@ -261,7 +273,15 @@ export default function DataGrid<T>({
                 <tr key={String(rowKey(row))} className={editing ? 'editable-row' : ''} onDoubleClick={() => handleDoubleClick(row)} title={rowTitle}>
                   {cols.map((c) => (
                     <td key={c.key}>
-                      {editing && editableKeys.includes(c.key) ? cellContent(row, c) : cellContent(row, c)}
+                      {editing && editableKeys.includes(c.key) ? (
+                        cellContent(row, c)
+                      ) : c.editOnClick ? (
+                        <div className="cell-click" onClick={() => startEdit(row)} title="انقر للتعديل">
+                          {cellContent(row, c)}
+                        </div>
+                      ) : (
+                        cellContent(row, c)
+                      )}
                     </td>
                   ))}
                   {actions && (

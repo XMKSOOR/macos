@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { toLatinDigits } from './lib'
+import { sanitizeNumberInput } from './lib'
 
 interface CurrencyInputProps {
   valueLbp: number
@@ -40,7 +40,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
       : ''
 
     const handle = (raw: string): void => {
-      const clean = toLatinDigits(raw.trim())
+      const clean = sanitizeNumberInput(raw.trim())
       setDraft(clean)
       if (clean === '' || Number.isNaN(Number(clean))) {
         onChange(0)
@@ -58,9 +58,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
       <div className={compact ? 'currency-input compact' : 'currency-input'}>
         <div className="currency-row">
           <input
-            type="number"
-            step={unit === 'usd' ? '0.01' : '1'}
-            min={0}
+            type="text"
             dir="ltr"
             inputMode="decimal"
             value={shown}
@@ -88,7 +86,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
   const shownUsd = focus !== 'lbp' && draftU !== null ? draftU : lbp ? fmtUsd(lbp / r) : ''
 
   const handleLbp = (raw: string): void => {
-    const clean = toLatinDigits(raw.trim())
+    const clean = sanitizeNumberInput(raw.trim())
     setDraftL(clean)
     if (clean === '' || Number.isNaN(Number(clean))) {
       onChange(0)
@@ -98,7 +96,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
   }
 
   const handleUsd = (raw: string): void => {
-    const clean = toLatinDigits(raw.trim())
+    const clean = sanitizeNumberInput(raw.trim())
     setDraftU(clean)
     if (clean === '' || Number.isNaN(Number(clean))) {
       onChange(0)
@@ -112,9 +110,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
       <div className="dual-row">
         <label className="dual-field">
           <input
-            type="number"
-            step="1"
-            min={0}
+            type="text"
             dir="ltr"
             inputMode="decimal"
             value={shownLbp}
@@ -135,9 +131,7 @@ export function CurrencyInput({ valueLbp, onChange, rate, placeholder = '0', dis
         <span className="dual-arrow">{'⟷'}</span>
         <label className="dual-field">
           <input
-            type="number"
-            step="0.01"
-            min={0}
+            type="text"
             dir="ltr"
             inputMode="decimal"
             value={shownUsd}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Field, useToast } from '../ui'
 import type { PrinterInfo, Settings } from '../lib'
-import { toLatinDigits } from '../lib'
+import { parseNumber } from '../lib'
 
 export default function SettingsScreen({
   settings,
@@ -259,9 +259,9 @@ export default function SettingsScreen({
           <div className="form-grid">
             <Field label="سعر الصرف (ل.س الجديدة مقابل $)">
               <input
-                type="number" dir="ltr" inputMode="decimal"
+                type="text" dir="ltr" inputMode="decimal"
                 value={form.usd_rate}
-                onChange={(e) => setForm({ ...form, usd_rate: Number(toLatinDigits(e.target.value)) })}
+                onChange={(e) => setForm({ ...form, usd_rate: parseNumber(e.target.value) })}
               />
             </Field>
             <Field label="معامل حذف الأصفار من العملة">
@@ -451,7 +451,8 @@ export default function SettingsScreen({
             </Field>
             <Field label="المنفذ (Port)">
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
                 value={form.mysql_port}
                 onChange={(e) => setForm({ ...form, mysql_port: e.target.value })}
                 dir="ltr"

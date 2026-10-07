@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Modal, Field, Empty, CurrencyCell, Confirm, useToast } from '../ui'
 import type { TreatmentPlan, TreatmentPlanItem, TreatmentPlanStatus, ProcedureTemplate } from '../lib'
+import { parseNumber } from '../lib'
 
 const PLAN_STATUSES: { value: TreatmentPlanStatus; label: string }[] = [
   { value: 'proposed', label: 'مقترحة' },
@@ -354,10 +355,11 @@ export default function TreatmentPlans({ patientId, rate }: { patientId: number;
             </Field>
             <Field label="التكلفة (ل.س)">
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 dir="ltr"
                 value={itemEdit.draft.cost}
-                onChange={(e) => setItemEdit({ ...itemEdit, draft: { ...itemEdit.draft, cost: Number(e.target.value) } })}
+                onChange={(e) => setItemEdit({ ...itemEdit, draft: { ...itemEdit.draft, cost: parseNumber(e.target.value) } })}
               />
             </Field>
             <div className="field full">

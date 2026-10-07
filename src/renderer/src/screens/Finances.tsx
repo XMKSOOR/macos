@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Field } from '../ui'
 import type { Appointment, CatalogItem, Expense, Invoice, Material, Settings } from '../lib'
-import { fmt, toLatinDigits } from '../lib'
+import { fmt, toLatinDigits, sanitizeNumberInput, parseNumber } from '../lib'
 
 /** المدخلات الوحيدة التي يكتبها المستخدم */
 interface PlanState {
@@ -432,16 +432,11 @@ export default function Finances({ settings }: { settings: Settings | null }): R
             <Field label="رأس المال المطلوب استرداده (Capital)">
               <div className="currency-row">
                 <input
-                  type="number"
+                  type="text"
                   dir="ltr"
                   inputMode="decimal"
-                  min={0}
-                  step={1000}
                   value={plan.capital}
-                  onChange={(e) => {
-                    const v = toLatinDigits(e.target.value)
-                    applyPlan({ capital: v })
-                  }}
+                  onChange={(e) => applyPlan({ capital: sanitizeNumberInput(e.target.value) })}
                   onFocus={(e) => e.target.select()}
                   placeholder="1040000"
                 />
@@ -453,15 +448,14 @@ export default function Finances({ settings }: { settings: Settings | null }): R
             </Field>
             <Field label="المدة الزمنية (Months)">
               <input
-                type="number"
+                type="text"
                 dir="ltr"
                 inputMode="decimal"
-                min={1}
-                max={36}
-                value={monthsDraft !== null ? monthsDraft : String(plan.numMonths)}
+                value={monthsDraft !== null ? monthsDraft : plan.numMonths ? String(plan.numMonths) : ''}
                 onChange={(e) => {
-                  setMonthsDraft(e.target.value)
-                  const n = Math.floor(Number(toLatinDigits(e.target.value)))
+                  const clean = sanitizeNumberInput(e.target.value)
+                  setMonthsDraft(clean)
+                  const n = Math.floor(parseNumber(clean))
                   if (Number.isFinite(n) && n >= 1) applyPlan({ numMonths: Math.min(36, n) })
                 }}
                 onBlur={() => setMonthsDraft(null)}

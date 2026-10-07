@@ -118,6 +118,31 @@ export function toLatinDigits(s: string): string {
   return s.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => DIGIT_MAP[d] ?? d)
 }
 
+/**
+ * تنقية إدخال رقمي: تحوّل الأرقام العربية/الفارسية إلى إنجليزية،
+ * وتحذف كل ما ليس رقماً أو فاصلة عشرية، وتسمح بعلامة سالب واحدة في البداية.
+ */
+export function sanitizeNumberInput(s: string, allowNegative = false): string {
+  let t = toLatinDigits(s)
+  t = t.replace(allowNegative ? /[^0-9.-]/g : /[^0-9.]/g, '')
+  if (allowNegative) {
+    const neg = t.startsWith('-')
+    t = t.replace(/-/g, '')
+    if (neg) t = '-' + t
+  }
+  const i = t.indexOf('.')
+  if (i >= 0) t = t.slice(0, i + 1) + t.slice(i + 1).replace(/\./g, '')
+  return t
+}
+
+/** تحويل نص إلى رقم بأمان (يتقبّل الأرقام العربية، الفارغ = 0). */
+export function parseNumber(s: string): number {
+  const t = sanitizeNumberInput(s, true)
+  if (t === '' || t === '-' || t === '.' || t === '-.') return 0
+  const n = Number(t)
+  return Number.isFinite(n) ? n : 0
+}
+
 export function useToday(): string {
   return new Date().toISOString().slice(0, 10)
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../ui'
 import type { PatientAttachment, ToothCondition, DentalChartEntry, PeriodontalChartEntry } from '../lib'
+import { parseNumber } from '../lib'
 
 const CONDITIONS: { value: ToothCondition; label: string; color: string; short: string }[] = [
   { value: 'healthy', label: 'سليم', color: '#e2e8f0', short: 'سليم' },
@@ -309,7 +310,7 @@ export default function Odontogram({
             <div className="odo-perio">
               <label>
                 عمق الجيب
-                <input type="number" dir="ltr" value={pd} onChange={(e) => setPd(Number(e.target.value))} />
+                <input type="text" inputMode="decimal" dir="ltr" value={pd} onChange={(e) => setPd(parseNumber(e.target.value))} />
               </label>
               <label>
                 النزيف (0/1)
@@ -320,11 +321,11 @@ export default function Odontogram({
               </label>
               <label>
                 الحركة (0-3)
-                <input type="number" dir="ltr" min={0} max={3} value={mobility} onChange={(e) => setMobility(Number(e.target.value))} />
+                <input type="text" inputMode="numeric" dir="ltr" value={mobility} onChange={(e) => setMobility(Math.min(3, parseNumber(e.target.value)))} />
               </label>
               <label>
                 انحسار اللثة
-                <input type="number" dir="ltr" value={recession} onChange={(e) => setRecession(Number(e.target.value))} />
+                <input type="text" inputMode="decimal" dir="ltr" value={recession} onChange={(e) => setRecession(parseNumber(e.target.value))} />
               </label>
               <button className="soft small" onClick={savePerio}>
                 حفظ اللثة

@@ -358,6 +358,28 @@ label {
   background: #f0fdf9;
 }
 
+/* الجداول ذات الأعمدة المثبّتة: لا تتغيّر عروض الأعمدة عند دخول وضع التعديل */
+table.data.fixed-cols {
+  table-layout: fixed;
+}
+table.data.fixed-cols td,
+table.data.fixed-cols th {
+  overflow: hidden;
+}
+table.data.fixed-cols .inline-input,
+table.data.fixed-cols .inline-dual {
+  min-width: 0;
+}
+table.data.fixed-cols .inline-dual .inline-input {
+  min-width: 0;
+  width: 100%;
+}
+.cell-click {
+  cursor: pointer;
+  display: inline-block;
+  min-width: 40px;
+}
+
 .soft.small,
 .ghost.small,
 .danger-ghost.small,

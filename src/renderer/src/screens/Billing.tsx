@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Confirm, CurrencyCell, Empty, Field, Modal, SearchBox, StatusBadge, useToast } from '../ui'
 import ExcelBar from '../excel'
 import type { CatalogItem, Invoice, Material, Patient, Role, Settings } from '../lib'
-import { can, fmt, today, toLatinDigits } from '../lib'
+import { can, fmt, today, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 
 interface Line {
@@ -439,7 +439,7 @@ function PayModal({
         </div>
       </div>
       <Field label="مبلغ الدفعة (ل.س)">
-        <input type="number" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(Number(toLatinDigits(e.target.value)))} autoFocus />
+        <input type="text" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(parseNumber(e.target.value))} autoFocus />
       </Field>
       <p className="muted mt-8" style={{ fontSize: 12 }}>
         بعد الدفعة يبقى: {(remaining - amount).toLocaleString('en-US')} ل.س = {(((remaining - amount) / rate)).toFixed(2)} $
@@ -580,10 +580,10 @@ function InvoiceEditor({
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         <Field label="سعر الصرف ($ → ل.س)">
-          <input type="number" dir="ltr" inputMode="decimal" value={usdRate} onChange={(e) => setUsdRate(Number(toLatinDigits(e.target.value)))} />
+          <input type="text" dir="ltr" inputMode="decimal" value={usdRate} onChange={(e) => setUsdRate(parseNumber(e.target.value))} />
         </Field>
         <Field label="الخصم (ل.س)">
-          <input type="number" dir="ltr" inputMode="decimal" value={discount} onChange={(e) => setDiscount(Number(toLatinDigits(e.target.value)))} />
+          <input type="text" dir="ltr" inputMode="decimal" value={discount} onChange={(e) => setDiscount(parseNumber(e.target.value))} />
         </Field>
       </div>
 
@@ -619,7 +619,7 @@ function InvoiceEditor({
         {lines.map((l) => (
           <div className="series-item" key={l.key}>
             <input value={l.name} onChange={(e) => updateLine(l.key, { name: e.target.value })} placeholder="اسم البند" />
-            <input className="qty-input" type="number" dir="ltr" inputMode="decimal" min={1} value={l.qty} onChange={(e) => updateLine(l.key, { qty: Math.max(1, Number(toLatinDigits(e.target.value)) || 1) })} />
+            <input className="qty-input" type="text" dir="ltr" inputMode="decimal" value={l.qty} onChange={(e) => updateLine(l.key, { qty: Math.max(1, parseNumber(e.target.value) || 1) })} />
             <CurrencyInput compact valueLbp={l.cost} rate={usdRate} onChange={(lbp) => updateLine(l.key, { cost: lbp })} placeholder="0" />
             <div className="amount-lbp">{fmt(l.cost * l.qty)}</div>
             <button className="soft small" onClick={() => setMatFor(l.key)}>
@@ -699,7 +699,7 @@ function MaterialPicker({
                 </option>
               ))}
             </select>
-            <input type="number" dir="ltr" inputMode="decimal" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Number(toLatinDigits(e.target.value)) || 1))} style={{ width: 80 }} />
+            <input type="text" dir="ltr" inputMode="decimal" value={qty} onChange={(e) => setQty(Math.max(1, parseNumber(e.target.value) || 1))} style={{ width: 80 }} />
             <button className="ghost" onClick={add}>
               إضافة
             </button>
