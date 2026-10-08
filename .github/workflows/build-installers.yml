@@ -19,7 +19,7 @@ jobs:
           - os: macos-latest
             name: macos
             run: npm run dist -- --publish never
-            artifact: DentalClinic-Mac-*.dmg
+            artifact: DentalClinic-Mac-*-x64.dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
