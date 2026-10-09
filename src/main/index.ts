@@ -7,12 +7,13 @@ import { drivePullOnStart, driveSyncOnQuit } from './sync'
 import { mysqlPullOnStart, mysqlPushOnQuit } from './mysql'
 import { supabasePullOnStart, supabasePushOnQuit } from './supabase'
 import { cloudPullOnStart, cloudPushOnQuit } from './cloud'
+import { startAutoSync } from './autoSync'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
 
 /**
- * طھظˆظ„ظٹط¯ ط§ظ„ظ…طµط§ط±ظٹظپ ط§ظ„ط¯ظˆط±ظٹط© ط§ظ„ظ…ط³طھط­ظ‚ط© ط¹ظ†ط¯ ط¨ط¯ط، ط§ظ„طھط·ط¨ظٹظ‚.
- * ظٹط³ط¬ظ‘ظ„ طھط­ط°ظٹط±ط§ظ‹ ط¹ظ†ط¯ ط§ظ„ظپط´ظ„ ط­طھظ‰ ظ„ط§ ظٹظ…ظ†ط¹ ط¥ظ‚ظ„ط§ط¹ ط§ظ„ط¨ط±ظ†ط§ظ…ط¬.
+ * توليد المصاريف الدورية المستحقة عند بدء التطبيق.
+ * يسجّل تحذيراً عند الفشل حتى لا يمنع إقلاع البرنامج.
  */
 async function runRecurringOnStart(): Promise<void> {
   try {
@@ -72,11 +73,11 @@ function createWindow(): BrowserWindow {
             const patients = await window.clinic.patients.list();
             const stats = await window.clinic.dashboard.stats('7');
             const printers = await window.clinic.printing.list();
-            const mat = await window.clinic.inventory.create({ name: 'ظ…ط§ط¯ط© ط§ط®طھط¨ط§ط±', category: 'ط§ط®طھط¨ط§ط±', unit: 'ط­ط¨ط©', quantity: 10, min_qty: 2, cost: 5000, supplier: '', notes: '' });
-            const cat = await window.clinic.catalog.create({ name: 'طµظ†ظپ ط§ط®طھط¨ط§ط±', price: 50000, description: '', cost: 10000, materials: [{ material_id: mat.id, qty: 2 }] });
+            const mat = await window.clinic.inventory.create({ name: 'مادة اختبار', category: 'اختبار', unit: 'حبة', quantity: 10, min_qty: 2, cost: 5000, supplier: '', notes: '' });
+            const cat = await window.clinic.catalog.create({ name: 'صنف اختبار', price: 50000, description: '', cost: 10000, materials: [{ material_id: mat.id, qty: 2 }] });
             const catReload = await window.clinic.catalog.list();
             const catRow = catReload.find(c => c.id === cat.id);
-            const p = await window.clinic.patients.create({ name: 'ط§ط®طھط¨ط§ط±', phone: '123', birth_date: '', gender: '', address: '', notes: '' });
+            const p = await window.clinic.patients.create({ name: 'اختبار', phone: '123', birth_date: '', gender: '', address: '', notes: '' });
             const inv = await window.clinic.invoices.create({ patient_id: p.id, date: '2026-09-11', usd_rate: 130, discount: 0, notes: '', items: [{ name: catRow.name, cost: catRow.price, qty: 1, catalog_id: cat.id, materials: [] }] });
             const matsAfter = await window.clinic.inventory.list();
             const qtyAfter = matsAfter.find(m => m.id === mat.id).quantity;
@@ -125,6 +126,7 @@ const leftover = (await window.clinic.expenses.list()).filter(e => e.note === '�
 app.whenReady().then(() => {
   initDb()
   registerIpc(ipcMain)
+  startAutoSync()
   void runRecurringOnStart()
   createWindow()
   void drivePullOnStart()

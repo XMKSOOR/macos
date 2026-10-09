@@ -121,6 +121,7 @@ import { applyCurrencyScale, backupDatabase, getDbPath, recalcUsd, replaceDbFrom
 import { mysqlConfig, mysqlPull, mysqlPush, mysqlTest } from './mysql'
 import { supabaseConfig, supabasePull, supabasePush, supabaseTest } from './supabase'
 import { cloudPull, cloudPush, cloudTest } from './cloud'
+import { markDirty } from './autoSync'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
 
@@ -132,11 +133,28 @@ function requireAuth(perm?: PermissionKey): User {
   return currentUser
 }
 
+const MUTATION_SUFFIX =
+  /:(create|update|delete|save|pay|adjust|import|importRows|setTooth|saveTooth|deleteTooth|complete|addItem|updateItem|deleteItem|runDue|changePassword|add)$/
+const MUTATION_EXACT = new Set([
+  'settings:save',
+  'settings:convertCurrency',
+  'db:restore',
+  'db:changeLocation',
+  'db:useLocal',
+  'files:import'
+])
+
+function isMutating(channel: string): boolean {
+  return MUTATION_EXACT.has(channel) || MUTATION_SUFFIX.test(channel)
+}
+
 export function registerIpc(ipc: IpcMain): void {
   const handle = (channel: string, fn: (args?: unknown) => unknown): void => {
     ipc.handle(channel, async (_ev, args) => {
       try {
-        return { ok: true, data: await fn(args) }
+        const data = await fn(args)
+        if (isMutating(channel)) markDirty()
+        return { ok: true, data }
       } catch (e) {
         if (process.env['IPC_TRACE']) console.error('IPC_ERR ' + channel + ' :: ' + (e instanceof Error ? (e.stack ?? e.message) : String(e)))
         return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -89,6 +89,7 @@ function enableCloudDefaults(): void {
     const seeded = db.prepare("SELECT value FROM settings WHERE key='supabase_pg_seeded'").get()
     if (!seeded) {
       db.prepare("UPDATE settings SET value='1' WHERE key='supabase_pg_auto'").run()
+      db.prepare("UPDATE settings SET value='1' WHERE key='supabase_auto'").run()
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('supabase_pg_seeded','1')").run()
     }
   } catch (e) {
