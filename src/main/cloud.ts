@@ -1,4 +1,4 @@
-import { getDb, getSettings } from './db'
+import { getDb } from './db'
 import { supabaseConfig } from './supabase'
 
 // الجداول المركّبة كاملة (نسخة معكوسة) على Supabase Postgres
@@ -199,20 +199,19 @@ function normalizeValue(v: unknown): string | number | null {
 }
 
 export async function cloudPushOnQuit(): Promise<void> {
-  const s = getSettings()
-  if ((s.supabase_pg_auto ?? '0') === '1' && cloudConfig()) {
-    try {
-      await cloudPush()
-    } catch {
-      /* best effort */
-    }
+  if (process.env['SKIP_SYNC'] === '1') return
+  if (!cloudConfig()) return
+  try {
+    await cloudPush()
+  } catch {
+    /* best effort */
   }
 }
 
 export async function cloudPullOnStart(): Promise<void> {
-  const s = getSettings()
-  if ((s.supabase_pg_auto ?? '0') !== '1' || !cloudConfig()) return
   if (process.env['SKIP_SYNC'] === '1') return
+  if (!cloudConfig()) return
+  // يُستخدم فقط عند أول تهيئة جهاز فارغ (نسخة Postgres للجوال)
   const empty = ['patients', 'appointments', 'invoices'].every((t) => countLocal(t) === 0)
   if (!empty) return
   try {

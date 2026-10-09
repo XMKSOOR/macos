@@ -86,12 +86,7 @@ function enableCloudDefaults(): void {
     db.prepare("UPDATE settings SET value=? WHERE key='supabase_url' AND (value IS NULL OR value='')").run(
       'https://mroziduublsrcogojvcp.supabase.co'
     )
-    const seeded = db.prepare("SELECT value FROM settings WHERE key='supabase_pg_seeded'").get()
-    if (!seeded) {
-      db.prepare("UPDATE settings SET value='1' WHERE key='supabase_pg_auto'").run()
-      db.prepare("UPDATE settings SET value='1' WHERE key='supabase_auto'").run()
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('supabase_pg_seeded','1')").run()
-    }
+    db.prepare("UPDATE settings SET value='1' WHERE key IN ('supabase_auto','supabase_pg_auto')").run()
   } catch (e) {
     console.error('تهيئة إعدادات المزامنة السحابية فشلت:', e)
   }

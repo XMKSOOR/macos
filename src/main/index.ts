@@ -1,5 +1,7 @@
 import 'dotenv/config'
+import { config as loadEnv } from 'dotenv'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { initDb, listDueRecurringExpenses, materializeDueRecurringExpenses } from './db'
 import { registerIpc } from './ipc'
@@ -10,6 +12,19 @@ import { cloudPullOnStart, cloudPushOnQuit } from './cloud'
 import { startAutoSync } from './autoSync'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
+
+/**
+ * تحميل مفاتيح Supabase المضمّنة مع النسخة المثبّتة (resources/app.env).
+ * لا يستبدل أي متغيّر بيئة موجود مسبقاً.
+ */
+function loadPackagedEnv(): void {
+  try {
+    const p = join(process.resourcesPath, 'app.env')
+    if (existsSync(p)) loadEnv({ path: p })
+  } catch {
+    /* ignore */
+  }
+}
 
 /**
  * توليد المصاريف الدورية المستحقة عند بدء التطبيق.
@@ -129,10 +144,13 @@ app.whenReady().then(() => {
   startAutoSync()
   void runRecurringOnStart()
   createWindow()
+  loadPackagedEnv()
   void drivePullOnStart()
   void mysqlPullOnStart()
-  void supabasePullOnStart()
-  void cloudPullOnStart()
+  void (async () => {
+    await supabasePullOnStart()
+    await cloudPullOnStart()
+  })()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

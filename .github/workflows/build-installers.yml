@@ -31,6 +31,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Write .env (from repository secrets)
+        shell: bash
+        run: |
+          cat > .env <<'EOF'
+          SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://mroziduublsrcogojvcp.supabase.co' }}
+          SUPABASE_SECRET_KEY=${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          EOF
+
       - name: Typecheck
         run: npm run typecheck
 

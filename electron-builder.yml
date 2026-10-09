@@ -6,6 +6,9 @@ directories:
 files:
   - out/**/*
   - package.json
+extraResources:
+  - from: .env
+    to: app.env
 asar: true
 win:
   target:
