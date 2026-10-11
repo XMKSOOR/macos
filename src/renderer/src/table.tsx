@@ -46,6 +46,19 @@ function parseCellValue(col: Col<unknown>, v: unknown): unknown {
   return String(v)
 }
 
+/** يقارن قيمة المُدخَل بالقيمة الأصلية لمعرفة إن كان الحقل قد تغيّر فعلاً */
+function cellChanged(col: Col<unknown>, next: unknown, orig: unknown): boolean {
+  if (col.type === 'number' || col.type === 'money') {
+    const a = next === '' || next === null || next === undefined ? NaN : Number(next)
+    const b = orig === '' || orig === null || orig === undefined ? NaN : Number(orig)
+    if (Number.isNaN(a) && Number.isNaN(b)) return false
+    return a !== b
+  }
+  const a = next === null || next === undefined ? '' : String(next)
+  const b = orig === null || orig === undefined ? '' : String(orig)
+  return a !== b
+}
+
 export default function DataGrid<T>({
   rows,
   cols,
@@ -84,11 +97,20 @@ export default function DataGrid<T>({
 
   const commit = async (): Promise<void> => {
     if (editKey === null) return
+    const row = rows.find((r) => rowKey(r) === editKey)
     setSaving(true)
     setErr('')
+    // نرسل الحقول التي تغيّرت فقط (وليس الصف كاملاً) حتى لا تُكتب فوق حقول أخرى
     const patch: Record<string, unknown> = {}
     for (const c of editableCols) {
-      patch[c.key] = parseCellValue(c as Col<unknown>, draft[c.key])
+      const next = parseCellValue(c as Col<unknown>, draft[c.key])
+      const orig = row ? (row as Record<string, unknown>)[c.key] : undefined
+      if (cellChanged(c as Col<unknown>, next, orig)) patch[c.key] = next
+    }
+    if (Object.keys(patch).length === 0) {
+      setSaving(false)
+      setEditKey(null)
+      return
     }
     try {
       await onSave(editKey, patch)

@@ -415,7 +415,7 @@ export const SHEET_SCHEMAS: SheetSchema[] = [
       { key: 'amount', header: 'المبلغ (ل.س)', sample: '5000000', aliases: ['amount', 'amount_lbp', 'المبلغ', 'القيمة'] },
       { key: 'amount', header: 'المبلغ ($)', sample: '5000', usd: true, aliases: ['amount_usd', 'amount_$', 'amount ($)', 'المبلغ بالدولار'] },
       { key: 'date', header: 'التاريخ', sample: '2026-09-11', aliases: ['date', 'اليوم'] },
-      { key: 'note', header: 'الملاحظة', sample: '', aliases: ['note', 'notes', 'ملاحظات'] }
+      { key: 'note', header: 'اسم الصنف', sample: '', aliases: ['note', 'notes', 'ملاحظات', 'اسم الصنف', 'الصنف'] }
     ]
   },
   {

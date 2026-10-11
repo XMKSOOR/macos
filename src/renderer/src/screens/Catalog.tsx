@@ -167,18 +167,10 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      const row = list.find((c) => c.id === Number(key))
-      if (!row) return
-      const merged = {
-        name: (patch.name as string) ?? row.name,
-        price: Number(patch.price ?? row.price),
-        description: (patch.description as string) ?? row.description,
-        materials: row.materials.map((m) => ({ material_id: m.material_id, qty: m.qty }))
-      }
-      await window.clinic.catalog.update(row.id, merged)
+      await window.clinic.catalog.update(Number(key), patch)
       load()
     },
-    [list, load]
+    [load]
   )
 
   const onImportRows = useCallback(

@@ -1134,23 +1134,35 @@ export function getPatientFile(id: number): PatientFileResult {
   }
 }
 
-export function updatePatient(id: number, p: Omit<Patient, 'id' | 'created_at'>): void {
-  db.prepare(
-    "UPDATE patients SET name=?, phone=?, birth_date=?, gender=?, address=?, notes=?, national_id=?, allergies=?, chronic_diseases=?, physiological_status=?, medical_notes=?, updated_at=datetime('now','localtime') WHERE id=?"
-  ).run(
-    latinDigits(p.name),
-    latinDigits(p.phone),
-    p.birth_date,
-    latinDigits(p.gender),
-    latinDigits(p.address),
-    latinDigits(p.notes),
-    latinDigits(p.national_id ?? ''),
-    latinDigits(p.allergies ?? ''),
-    latinDigits(p.chronic_diseases ?? ''),
-    latinDigits(p.physiological_status ?? ''),
-    latinDigits(p.medical_notes ?? ''),
-    id
-  )
+export function updatePatient(id: number, p: Partial<Omit<Patient, 'id' | 'created_at'>>): void {
+  const sets: string[] = []
+  const vals: (string | number | null)[] = []
+  const textCols = [
+    'name',
+    'phone',
+    'gender',
+    'address',
+    'notes',
+    'national_id',
+    'allergies',
+    'chronic_diseases',
+    'physiological_status',
+    'medical_notes'
+  ] as const
+  for (const k of textCols) {
+    const v = (p as Record<string, unknown>)[k]
+    if (v === undefined) continue
+    sets.push(k + '=?')
+    vals.push(latinDigits(String(v ?? '')))
+  }
+  if (p.birth_date !== undefined) {
+    sets.push('birth_date=?')
+    vals.push(String(p.birth_date ?? ''))
+  }
+  if (sets.length === 0) return
+  sets.push("updated_at=datetime('now','localtime')")
+  vals.push(id)
+  db.prepare(`UPDATE patients SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
 export function deletePatient(id: number): void {
@@ -1202,16 +1214,23 @@ export function createAppointment(a: Omit<Appointment, 'id' | 'created_at'>): Ap
   return { ...a, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
 }
 
-export function updateAppointment(id: number, a: Omit<Appointment, 'id' | 'created_at'>): void {
-  db.prepare('UPDATE appointments SET patient_id=?, date=?, time=?, reason=?, notes=?, status=? WHERE id=?').run(
-    a.patient_id,
-    a.date,
-    a.time,
-    a.reason,
-    a.notes,
-    a.status,
-    id
-  )
+export function updateAppointment(id: number, a: Partial<Omit<Appointment, 'id' | 'created_at'>>): void {
+  const sets: string[] = []
+  const vals: (string | number | null)[] = []
+  const textCols = ['date', 'time', 'reason', 'notes', 'status'] as const
+  for (const k of textCols) {
+    const v = (a as Record<string, unknown>)[k]
+    if (v === undefined) continue
+    sets.push(k + '=?')
+    vals.push(v === null ? null : String(v))
+  }
+  if (a.patient_id !== undefined) {
+    sets.push('patient_id=?')
+    vals.push(Number(a.patient_id))
+  }
+  if (sets.length === 0) return
+  vals.push(id)
+  db.prepare(`UPDATE appointments SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
 export function deleteAppointment(id: number): void {
@@ -1291,15 +1310,30 @@ export function createCatalogItem(
 
 export function updateCatalogItem(
   id: number,
-  c: Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials'> & { materials?: CatalogBomInput[] }
+  c: Partial<Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials'>> & { materials?: CatalogBomInput[] }
 ): void {
-  const name = latinDigits(c.name)
-  const priceN = numAny(c.price)
-  const price = Number.isNaN(priceN) ? 0 : priceN
   db.prepare('BEGIN').run()
   try {
-    db.prepare('UPDATE catalog SET name=?, price=?, description=? WHERE id=?').run(name, price, latinDigits(c.description ?? ''), id)
-    syncBom(id, c.materials ?? [])
+    const sets: string[] = []
+    const vals: (string | number | null)[] = []
+    if (c.name !== undefined) {
+      sets.push('name=?')
+      vals.push(latinDigits(String(c.name ?? '')))
+    }
+    if (c.price !== undefined) {
+      const n = numAny(c.price)
+      sets.push('price=?')
+      vals.push(Number.isNaN(n) ? 0 : n)
+    }
+    if (c.description !== undefined) {
+      sets.push('description=?')
+      vals.push(latinDigits(String(c.description ?? '')))
+    }
+    if (sets.length) {
+      vals.push(id)
+      db.prepare(`UPDATE catalog SET ${sets.join(', ')} WHERE id=?`).run(...vals)
+    }
+    if (c.materials) syncBom(id, c.materials)
     recalcCatalogUsd(id)
     db.prepare('COMMIT').run()
   } catch (e) {
@@ -1346,17 +1380,33 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at'>): Material
   return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
 }
 
-export function updateMaterial(id: number, m: Omit<Material, 'id' | 'created_at'>): void {
+export function updateMaterial(id: number, m: Partial<Omit<Material, 'id' | 'created_at'>>): void {
   const rate = getSettings().usd_rate
-  const clean = { ...m, name: latinDigits(m.name), category: latinDigits(m.category ?? ''), unit: latinDigits(m.unit ?? ''), supplier: latinDigits(m.supplier ?? ''), notes: latinDigits(m.notes ?? '') }
-  const costN = numAny(clean.cost)
-  const cost = Number.isNaN(costN) ? 0 : costN
-  const minN = numAny(clean.min_qty)
-  const minQty = Number.isNaN(minN) ? 0 : minN
-  const costUsd = rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0
-  db.prepare(
-    'UPDATE materials SET name=?, category=?, unit=?, min_qty=?, cost=?, cost_usd=?, supplier=?, notes=? WHERE id=?'
-  ).run(clean.name, clean.category, clean.unit, minQty, cost, costUsd, clean.supplier, clean.notes, id)
+  const sets: string[] = []
+  const vals: (string | number | null)[] = []
+  const textCols = ['name', 'category', 'unit', 'supplier', 'notes'] as const
+  for (const k of textCols) {
+    const v = (m as Record<string, unknown>)[k]
+    if (v === undefined) continue
+    sets.push(k + '=?')
+    vals.push(latinDigits(String(v ?? '')))
+  }
+  if (m.min_qty !== undefined) {
+    const n = numAny(m.min_qty)
+    sets.push('min_qty=?')
+    vals.push(Number.isNaN(n) ? 0 : n)
+  }
+  if (m.cost !== undefined) {
+    const c = numAny(m.cost)
+    const cost = Number.isNaN(c) ? 0 : c
+    sets.push('cost=?')
+    vals.push(cost)
+    sets.push('cost_usd=?')
+    vals.push(rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0)
+  }
+  if (sets.length === 0) return
+  vals.push(id)
+  db.prepare(`UPDATE materials SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
 export function deleteMaterial(id: number): void {
@@ -1739,18 +1789,45 @@ export function createExpense(e: Omit<Expense, 'id' | 'created_at'>): Expense {
   }
 }
 
-export function updateExpense(id: number, e: Omit<Expense, 'id' | 'created_at'>): void {
+export function updateExpense(id: number, e: Partial<Omit<Expense, 'id' | 'created_at'>>): void {
   const rate = getSettings().usd_rate
-  const clean = { ...e, category: latinDigits(e.category ?? ''), note: latinDigits(e.note ?? '') }
-  const amountN = numAny(clean.amount)
-  const amount = Number.isNaN(amountN) ? 0 : amountN
-  const amountUsd = rate > 0 ? Math.round((amount / rate) * 100) / 100 : 0
-  const recurring = clean.is_recurring ? 1 : 0
-  const recurrence = (clean.recurrence ?? 'monthly') as Recurrence
-  const nextDue = recurring ? clean.next_due || nextDueDate(clean.date, recurrence) : ''
-  db.prepare(
-    'UPDATE expenses SET category=?, amount=?, amount_usd=?, note=?, date=?, is_recurring=?, recurrence=?, next_due=? WHERE id=?'
-  ).run(clean.category, amount, amountUsd, clean.note, clean.date, recurring, recurrence, nextDue, id)
+  const sets: string[] = []
+  const vals: (string | number | null)[] = []
+  if (e.category !== undefined) {
+    sets.push('category=?')
+    vals.push(latinDigits(String(e.category ?? '')))
+  }
+  if (e.note !== undefined) {
+    sets.push('note=?')
+    vals.push(latinDigits(String(e.note ?? '')))
+  }
+  if (e.date !== undefined) {
+    sets.push('date=?')
+    vals.push(String(e.date ?? ''))
+  }
+  if (e.amount !== undefined) {
+    const a = numAny(e.amount)
+    const amount = Number.isNaN(a) ? 0 : Math.round(a)
+    sets.push('amount=?')
+    vals.push(amount)
+    sets.push('amount_usd=?')
+    vals.push(rate > 0 ? Math.round((amount / rate) * 100) / 100 : 0)
+  }
+  if (e.is_recurring !== undefined) {
+    sets.push('is_recurring=?')
+    vals.push(e.is_recurring ? 1 : 0)
+  }
+  if (e.recurrence !== undefined) {
+    sets.push('recurrence=?')
+    vals.push(String(e.recurrence ?? 'monthly'))
+  }
+  if (e.next_due !== undefined) {
+    sets.push('next_due=?')
+    vals.push(String(e.next_due ?? ''))
+  }
+  if (sets.length === 0) return
+  vals.push(id)
+  db.prepare(`UPDATE expenses SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
 export function deleteExpense(id: number): void {

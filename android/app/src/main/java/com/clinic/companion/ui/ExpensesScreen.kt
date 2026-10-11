@@ -152,7 +152,7 @@ private fun ExpenseEditDialog(
         LabeledField("التصنيف", category) { category = it }
         LabeledField("المبلغ", amount) { amount = it }
         LabeledField("التاريخ (YYYY-MM-DD)", date) { date = it }
-        LabeledField("ملاحظة", note, singleLine = false, minLines = 2) { note = it }
+        LabeledField("اسم الصنف", note, singleLine = false, minLines = 2) { note = it }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
           Text("متكرر", fontWeight = FontWeight.Medium)
           Switch(checked = recurring, onCheckedChange = { recurring = it })

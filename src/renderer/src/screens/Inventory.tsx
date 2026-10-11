@@ -113,17 +113,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
       const row = list.find((m) => m.id === Number(key))
       if (!row) return
-      const merged = {
-        name: (patch.name as string) ?? row.name,
-        category: (patch.category as string) ?? row.category,
-        unit: (patch.unit as string) ?? row.unit,
-        quantity: row.quantity,
-        min_qty: Number(patch.min_qty ?? row.min_qty),
-        cost: Number(patch.cost ?? row.cost),
-        supplier: (patch.supplier as string) ?? row.supplier,
-        notes: (patch.notes as string) ?? row.notes
-      }
-      await window.clinic.inventory.update(row.id, merged)
+      await window.clinic.inventory.update(row.id, patch)
       const targetQty = patch.quantity !== undefined ? Number(patch.quantity) : row.quantity
       const delta = targetQty - row.quantity
       if (delta) {

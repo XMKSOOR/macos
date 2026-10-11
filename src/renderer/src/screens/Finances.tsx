@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Field } from '../ui'
+import { Field, useToast } from '../ui'
 import type { Appointment, CatalogItem, Expense, Invoice, Material, Settings } from '../lib'
 import { fmt, toLatinDigits, sanitizeNumberInput, parseNumber } from '../lib'
 
@@ -67,11 +67,13 @@ export default function Finances({ settings }: { settings: Settings | null }): R
   const rate = settings?.usd_rate ?? 130
 
   const [plan, setPlan] = useState<PlanState>(defaultPlan)
+  const [dirty, setDirty] = useState(false)
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
+  const toast = useToast()
 
   const savePlan = useCallback((p: PlanState): void => {
     window.clinic.settings
@@ -79,13 +81,11 @@ export default function Finances({ settings }: { settings: Settings | null }): R
       .catch(() => {})
   }, [])
 
-  const debouncedSave = useMemo(() => {
-    let t = 0
-    return (p: PlanState): void => {
-      window.clearTimeout(t)
-      t = window.setTimeout(() => savePlan(p), 600)
-    }
-  }, [savePlan])
+  const saveNow = (): void => {
+    savePlan(plan)
+    setDirty(false)
+    toast('تم حفظ إعدادات الخطة', 'success')
+  }
 
   useEffect(() => {
     const stored = settings?.feasibility_plan
@@ -102,10 +102,6 @@ export default function Finances({ settings }: { settings: Settings | null }): R
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    debouncedSave(plan)
-  }, [plan, debouncedSave])
 
   // ---- كل البيانات تُلتقط تلقائياً من مُدخلات البرنامج ----
   useEffect(() => {
@@ -143,7 +139,10 @@ export default function Finances({ settings }: { settings: Settings | null }): R
       .catch(() => {})
   }, [])
 
-  const applyPlan = (patch: Partial<PlanState>): void => setPlan((p) => ({ ...p, ...patch }))
+  const applyPlan = (patch: Partial<PlanState>): void => {
+    setPlan((p) => ({ ...p, ...patch }))
+    setDirty(true)
+  }
 
   // ---- المتغيرات التلقائية + الموتر الحسابي ----
   const src = useMemo(() => {
@@ -426,6 +425,9 @@ export default function Finances({ settings }: { settings: Settings | null }): R
           <div className="muted" style={{ fontSize: 12 }}>
             تكتب هنا فقط: <b>رأس المال</b> و<b>المدة</b> و<b>تاريخ البداية</b> — كل ما عداه يُحتسب تلقائياً من فواتيرك ومخزونك ومواعيدك.
           </div>
+          <button onClick={saveNow} disabled={!dirty} title="حفظ إعدادات الخطة">
+            {dirty ? 'حفظ' : 'محفوظ'}
+          </button>
         </div>
         <div className="panel-body">
           <div className="form-grid three">
@@ -788,7 +790,7 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                   <th>التصنيف</th>
                   <th>المبلغ (ل.س)</th>
                   <th style={{ width: 140 }}>الدولار ($)</th>
-                  <th>ملاحظة</th>
+                  <th>اسم الصنف</th>
                 </tr>
               </thead>
               <tbody>

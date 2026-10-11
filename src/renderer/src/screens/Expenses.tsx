@@ -25,7 +25,7 @@ const cols: Col<Expense>[] = [
     options: CATEGORIES.map((c) => ({ value: c, label: c }))
   },
   { key: 'amount', label: 'المبلغ', type: 'money' },
-  { key: 'note', label: 'الملاحظة' },
+  { key: 'note', label: 'اسم الصنف' },
   {
     key: 'next_due',
     label: 'الاستحقاق التالي',
@@ -156,18 +156,10 @@ export default function Expenses({ settings, role }: { settings: Settings | null
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      const row = list.find((e) => e.id === Number(key))
-      if (!row) return
-      const merged = {
-        category: (patch.category as string) ?? row.category,
-        amount: Math.round(Number(patch.amount ?? row.amount)),
-        note: (patch.note as string) ?? row.note,
-        date: (patch.date as string) ?? row.date
-      }
-      await window.clinic.expenses.update(row.id, merged)
+      await window.clinic.expenses.update(Number(key), patch)
       load(from, to)
     },
-    [list, load, from, to]
+    [load, from, to]
   )
 
   const onImportRows = useCallback(
@@ -383,7 +375,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 </Field>
               </>
             )}
-            <Field label="الملاحظة">
+            <Field label="اسم الصنف">
               <input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
             </Field>
           </div>
