@@ -170,3 +170,28 @@ data class Medicine(
   val frequency: String = "",
   val category: String = "prescription"
 )
+
+data class DayStat(val date: String = "", val income: Long = 0, val expenses: Long = 0)
+
+data class DashboardStats(
+  val periodDays: Int = 7,
+  val patientsCount: Int = 0,
+  val todayAppointments: Int = 0,
+  val upcomingAppointments: Int = 0,
+  val income: Long = 0,
+  val expenses: Long = 0,
+  val soldCost: Long = 0,
+  val lowMaterials: Int = 0,
+  val unpaidTotal: Long = 0,
+  val recentInvoices: List<Invoice> = emptyList(),
+  val daily: List<DayStat> = emptyList(),
+  val patients: List<Patient> = emptyList()
+)
+
+data class EmbeddedInvoice(val date: String = "")
+
+data class ItemWithInvoice(
+  val cost: Long = 0,
+  val qty: Long = 1,
+  val invoices: EmbeddedInvoice? = null
+)

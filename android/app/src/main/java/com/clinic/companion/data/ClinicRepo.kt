@@ -109,6 +109,64 @@ class ClinicRepo(private val prefs: Prefs) {
 
   suspend fun usdRate(): Double = settingsMap()["usd_rate"]?.toDoubleOrNull() ?: 130.0
 
+  /** لوحة الملخص مطابقة لصفحة ويندوز/ماك: دخل/مصاريف/كلفة بيع/ذمم/مواد حرجة/أحدث الفواتير/رسم يومي. */
+  suspend fun dashboardStats(days: Int): DashboardStats {
+    val todayStr = today()
+    val fromDate = dateDaysAfter(todayStr, -(days - 1))
+    val patients = listPatients("")
+    val upcoming = upcoming(todayStr)
+    val periodInvoices = decodeList<Invoice>(
+      api().get("invoices?select=id,invoice_no,date,total,paid,status,patient_id&date=gte.$fromDate&order=id.desc&limit=2000")
+    )
+    val expenses = decodeList<Expense>(
+      api().get("expenses?select=amount,date&date=gte.$fromDate&limit=2000")
+    )
+    val sold = decodeList<ItemWithInvoice>(
+      api().get("invoice_items?select=cost,qty,invoices(date)&invoices.date=gte.$fromDate")
+    )
+    val unpaid = decodeList<Invoice>(api().get("invoices?select=total,paid&status=neq.paid"))
+    val mats = decodeList<Material>(api().get("materials?select=quantity,min_qty"))
+    val recent = decodeList<Invoice>(
+      api().get("invoices?select=id,invoice_no,date,total,paid,status,patient_id&order=id.desc&limit=8")
+    )
+
+    val income = periodInvoices.sumOf { it.paid }
+    val expSum = expenses.sumOf { it.amount }
+    val soldCost = sold
+      .filter { it.invoices?.date?.let { d -> d >= fromDate } == true }
+      .sumOf { it.cost * it.qty }
+    val lowMaterials = mats.count { it.minQty > 0 && it.quantity <= it.minQty }
+    val unpaidTotal = unpaid.sumOf { (it.total - it.paid).coerceAtLeast(0L) }
+
+    val dailyMap = LinkedHashMap<String, DayStat>()
+    var cursor = fromDate
+    while (cursor <= todayStr) {
+      dailyMap[cursor] = DayStat(cursor)
+      cursor = dateDaysAfter(cursor, 1)
+    }
+    periodInvoices.groupBy { it.date }.forEach { (d, list) ->
+      dailyMap[d]?.let { cur -> dailyMap[d] = cur.copy(income = list.sumOf { it.paid }) }
+    }
+    expenses.groupBy { it.date }.forEach { (d, list) ->
+      dailyMap[d]?.let { cur -> dailyMap[d] = cur.copy(expenses = list.sumOf { it.amount }) }
+    }
+
+    return DashboardStats(
+      periodDays = days,
+      patientsCount = patients.size,
+      todayAppointments = upcoming.count { it.date == todayStr },
+      upcomingAppointments = upcoming.count { it.date >= todayStr },
+      income = income,
+      expenses = expSum,
+      soldCost = soldCost,
+      lowMaterials = lowMaterials,
+      unpaidTotal = unpaidTotal,
+      recentInvoices = recent,
+      daily = dailyMap.values.toList(),
+      patients = patients
+    )
+  }
+
   suspend fun saveSettings(values: Map<String, String>) {
     val arr = values.map { mapOf("key" to it.key, "value" to it.value) }
     api().upsert("settings", SupabaseApi.encode(arr))
@@ -273,10 +331,25 @@ class ClinicRepo(private val prefs: Prefs) {
       "quarterly" -> cal.add(java.util.Calendar.MONTH, 3)
       else -> cal.add(java.util.Calendar.MONTH, 1)
     }
-    return "%04d-%02d-%02d".format(
-      cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH)
-    )
+    return formatDate(cal)
   }
+
+  private fun today(): String {
+    val cal = java.util.Calendar.getInstance()
+    return formatDate(cal)
+  }
+
+  private fun dateDaysAfter(date: String, n: Int): String {
+    val parts = date.split("-").mapNotNull { it.toIntOrNull() }
+    if (parts.size != 3) return date
+    val cal = java.util.Calendar.getInstance()
+    cal.set(parts[0], parts[1] - 1, parts[2])
+    cal.add(java.util.Calendar.DAY_OF_MONTH, n)
+    return formatDate(cal)
+  }
+
+  private fun formatDate(cal: java.util.Calendar): String =
+    "%04d-%02d-%02d".format(cal.get(java.util.Calendar.YEAR), cal.get(java.util.Calendar.MONTH) + 1, cal.get(java.util.Calendar.DAY_OF_MONTH))
 
   // ---- الفواتير ----
   suspend fun nextInvoiceNo(): String {

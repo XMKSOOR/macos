@@ -23,9 +23,6 @@ jobs:
           - name: macOS x64 (Catalina 10.15)
             os: macos-14
             args: --mac --x64
-          - name: macOS arm64 (Apple Silicon)
-            os: macos-14
-            args: --mac --arm64
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
