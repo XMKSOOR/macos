@@ -237,15 +237,17 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('users:update', (args) => {
     requireAuth('manageUsers')
-    const { id, username, role, full_name, password, permissions } = args as {
+    const { id, data } = args as {
       id: number
-      username: string
-      role: User['role']
-      full_name: string
-      password?: string
-      permissions?: Record<string, boolean>
+      data: {
+        username: string
+        role: User['role']
+        full_name: string
+        password?: string
+        permissions?: Record<string, boolean>
+      }
     }
-    updateUser(id, username, role, full_name, password, permissions)
+    updateUser(id, data.username, data.role, data.full_name, data.password, data.permissions)
     return true
   })
   handle('users:delete', (args) => {

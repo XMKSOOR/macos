@@ -19,11 +19,31 @@ const SYNC_TABLES: string[] = [
   'invoice_materials',
   'stock_movements',
   'expenses',
+  'dental_charts',
+  'treatment_plans',
+  'treatment_plan_items',
+  'periodontal_charts',
+  'recall_reminders',
+  'tooth_history',
+  'anesthesia_records',
+  'lab_cases',
+  'implant_records',
+  'consent_forms',
+  'risk_assessments',
+  'referrals',
+  'procedure_templates',
+  'insurance_fees',
+  'sterilization_log',
+  'education_materials',
+  'postop_instructions',
+  'clinical_note_templates',
   'settings'
 ]
 
 // ترتيب الحذف على الخادم (الأبناء أولاً لاحترام المفاتيح الأجنبية)
 const DELETE_ORDER: string[] = [
+  'treatment_plan_items',
+  'treatment_plans',
   'invoice_materials',
   'invoice_items',
   'invoices',
@@ -34,9 +54,25 @@ const DELETE_ORDER: string[] = [
   'materials',
   'expenses',
   'patient_medications',
+  'dental_charts',
+  'periodontal_charts',
+  'recall_reminders',
+  'tooth_history',
+  'anesthesia_records',
+  'lab_cases',
+  'implant_records',
+  'consent_forms',
+  'risk_assessments',
+  'referrals',
   'medicines',
   'patients',
   'users',
+  'procedure_templates',
+  'insurance_fees',
+  'sterilization_log',
+  'education_materials',
+  'postop_instructions',
+  'clinical_note_templates',
   'settings'
 ]
 
@@ -55,6 +91,24 @@ const INSERT_ORDER: string[] = [
   'invoice_materials',
   'stock_movements',
   'expenses',
+  'treatment_plans',
+  'treatment_plan_items',
+  'dental_charts',
+  'periodontal_charts',
+  'recall_reminders',
+  'tooth_history',
+  'anesthesia_records',
+  'lab_cases',
+  'implant_records',
+  'consent_forms',
+  'risk_assessments',
+  'referrals',
+  'procedure_templates',
+  'insurance_fees',
+  'sterilization_log',
+  'education_materials',
+  'postop_instructions',
+  'clinical_note_templates',
   'settings'
 ]
 
@@ -268,13 +322,16 @@ function capturePlans(): Record<string, PushPlan> {
 /** يرفع خططاً ملتقطة مسبقاً: upsert للصفوف المتغيرة، ثم حذف الصفوف المحذوفة محلياً */
 async function pushPlans(
   cfg: CloudConfig,
-  plans: Record<string, PushPlan>
+  plans: Record<string, PushPlan>,
+  failed: string[] = []
 ): Promise<{ pushed: number; removed: number; bad: Set<string> }> {
   const bad = new Set<string>()
+  const skip = new Set(failed)
   let pushed = 0
   let removed = 0
 
   for (const t of INSERT_ORDER) {
+    if (skip.has(t)) continue
     const plan = plans[t]
     if (!plan || plan.upsert.length === 0) continue
     try {
@@ -293,7 +350,7 @@ async function pushPlans(
   }
 
   for (const t of DELETE_ORDER) {
-    if (bad.has(t)) continue
+    if (bad.has(t) || skip.has(t)) continue
     const deletes = plans[t]?.deletes ?? []
     if (deletes.length === 0) continue
     try {
@@ -378,7 +435,7 @@ export async function cloudSync(): Promise<number> {
   lastPullChanged = counts.inserted + counts.updated + counts.deleted
 
   // 3) ارفع تغييرات المحلي التي التقطناها قبل الدمج
-  const { pushed, removed, bad } = await pushPlans(cfg, plans)
+  const { pushed, removed, bad } = await pushPlans(cfg, plans, failed)
 
   // 4) حدّث baseline من الحالة المحلية النهائية
   for (const t of INSERT_ORDER) {

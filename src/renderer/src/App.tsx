@@ -48,6 +48,7 @@ export default function App(): React.JSX.Element {
   const [screen, setScreen] = useState<ScreenKey>('dashboard')
   const [patientFileId, setPatientFileId] = useState<number | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
   const toast = useToast()
 
   useEffect(() => {
@@ -82,16 +83,20 @@ export default function App(): React.JSX.Element {
         .then(setSettings)
         .catch(() => {})
     }
-  }, [user])
+  }, [user, refreshKey])
 
   useEffect(() => {
     if (!user) return
     let timer: number | undefined
     const off = window.clinic.sync.onRefresh((p) => {
-      // لا نعيد تحميل الواجهة إلا عند تغيّر بيانات فعلي (سحب صفوف معدلة)
+      // لا نعيد تحميل التطبيق كاملاً (كان يُغلق الصفحة الحالية ويُرجع للوحة التحكم)
+      // بل نُعيد تركيب الشاشة الحالية فقط لتقرأ البيانات المحدّثة من السحابة.
       if (!p.changed) return
       if (timer) return
-      timer = window.setTimeout(() => window.location.reload(), 300)
+      timer = window.setTimeout(() => {
+        timer = undefined
+        setRefreshKey((k) => k + 1)
+      }, 300)
     })
     return () => {
       if (timer) window.clearTimeout(timer)
@@ -164,7 +169,7 @@ export default function App(): React.JSX.Element {
             {toLatinDigits(new Date().toLocaleDateString('ar-LB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }))}
           </div>
         </div>
-        <div className="content">
+        <div className="content" key={refreshKey}>
           {screen === 'dashboard' && <Dashboard settings={settings} onOpenPatient={openPatient} />}
           {screen === 'patients' && (
             <Patients
