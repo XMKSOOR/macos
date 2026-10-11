@@ -56,6 +56,9 @@ jobs:
             echo "::warning::لم تُضبط أسرار Supabase في الإعدادات (Settings>Secrets) — ستبنى النسخة بدون مفتاح وستكون المزامنة السحابية معطلة"
           fi
 
+      - name: Compile app (electron-vite)
+        run: npm run build
+
       - name: Build installer
         run: npx electron-builder ${{ matrix.args }} --publish never
 
