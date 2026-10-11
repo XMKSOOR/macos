@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { backupDatabase, getDb, getDbPath, getSettings } from './db'
 import { fingerprintDb, readSyncState, writeSyncState, SYNC_TABLES } from './syncCore'
 import { driveRemote, driveUpload, driveDownload } from './sync'
-import { mysqlConfig, mysqlPush, mysqlPull, mysqlRemoteFp, mysqlPullChanged, resetMysqlPullChanged } from './mysql'
+import { mysqlConfig, mysqlPush, mysqlPull, mysqlRemoteFp, mysqlPullChanged, resetMysqlPullChanged, mysqlSync } from './mysql'
 import { supabaseConfig, supabasePush, supabasePull, supabaseRemoteFp } from './supabase'
-import { cloudConfig, cloudPush, cloudPull, cloudRemoteFp, cloudPullChanged, resetCloudPullChanged } from './cloud'
+import { cloudConfig, cloudPush, cloudPull, cloudRemoteFp, cloudPullChanged, resetCloudPullChanged, cloudSync } from './cloud'
 
 const DEBOUNCE_MS = 3000
 const PERIOD_MS = 60 * 1000
@@ -34,6 +34,8 @@ interface SyncUnit {
   fetchRemote: () => Promise<RemoteFp | null>
   push: () => Promise<void>
   pull: () => Promise<void>
+  /** مزامنة ثنائية الاتجاه (سحب ثم رفع) — تُعيد عدد الصفوف التي غيّرها السحب */
+  sync?: () => Promise<number>
   /** عدد الصفوف التي غيّرها آخر سحب فعلياً (يُستعمل لتحديد هل نُعيد تحميل الواجهة) */
   pullChanged?: () => number
 }
@@ -89,11 +91,21 @@ function units(): SyncUnit[] {
     },
     {
       id: 'mysql',
-      autoOn: () => (s.mysql_auto ?? '0') === '1' && !!mysqlConfig(),
-      whyOff: () =>
-        (s.mysql_auto ?? '0') !== '1'
-          ? 'mysql_auto != 1'
-          : 'بيانات اتصال MySQL غير مكتملة',
+      autoOn: () => {
+        if ((s.mysql_auto ?? '0') !== '1') return false
+        const cfg = mysqlConfig()
+        if (!cfg) return false
+        // عنوان Postgres (مثل Supabase pooler) لا يعمل مع بروتوكول MySQL — نُعطّله
+        return !/supabase|pooler/i.test(cfg.host)
+      },
+      whyOff: () => {
+        if ((s.mysql_auto ?? '0') !== '1') return 'mysql_auto != 1'
+        const cfg = mysqlConfig()
+        if (!cfg) return 'بيانات اتصال MySQL غير مكتملة'
+        if (/supabase|pooler/i.test(cfg.host))
+          return 'عنوان MySQL يشير إلى Postgres (Supabase pooler) — أدخل بيانات MySQL حقيقية أو عطّل مزامنة MySQL'
+        return 'غير مفعّل'
+      },
       fetchRemote: mysqlRemoteFp,
       push: async () => {
         await mysqlPush()
@@ -101,6 +113,7 @@ function units(): SyncUnit[] {
       pull: async () => {
         await mysqlPull()
       },
+      sync: () => mysqlSync(),
       pullChanged: () => mysqlPullChanged()
     },
     {
@@ -134,6 +147,7 @@ function units(): SyncUnit[] {
       pull: async () => {
         await cloudPull()
       },
+      sync: () => cloudSync(),
       pullChanged: () => cloudPullChanged()
     }
   ]
@@ -197,6 +211,26 @@ async function runUnit(u: SyncUnit): Promise<'push' | 'pull' | 'none' | 'error'>
 
   const local = fingerprintDb()
   const state = readSyncState(u.id)
+
+  // مزامنة ثنائية الاتجاه للنقلات القائمة (Postgres/MySQL): تنتقل التعديلات والحذوفات
+  // في الاتجاهين معاً بدل «رفع أو سحب» الذي كان يُلغي تعديل أحد الجهازين.
+  if (u.sync && state && state.lastSyncAt) {
+    const remoteChanged = (remote?.hash ?? '') !== state.remoteHash
+    const localChanged = local.hash !== state.localHash
+    if (!remoteChanged && !localChanged) {
+      storeState(u.id, remote?.hash ?? '', remote?.rows ?? 0)
+      logUnit(u, 'لا تغييرات على الجهازين — بلا عمل')
+      return 'none'
+    }
+    const changed = await withTimeout(u.sync(), UNIT_TIMEOUT_MS)
+    if (changed === TIMEOUT) {
+      logUnit(u, `مهلة sync (${UNIT_TIMEOUT_MS}ms) انتهت`)
+      return 'error'
+    }
+    storeState(u.id, remote?.hash ?? '', remote?.rows ?? 0)
+    logUnit(u, `sync اكتمل ✓ (سحب ${changed} صفاً)`)
+    return changed > 0 ? 'pull' : 'push'
+  }
 
   let action: 'push' | 'pull'
   if (!remote) {

@@ -184,66 +184,80 @@ export async function mysqlTest(): Promise<string> {
   }
 }
 
+interface PushPlan {
+  upsert: Record<string, unknown>[]
+  deletes: (string | number)[]
+}
+
+/** يلتقط تغييرات الطرف المحلي بالنسبة لآخر مزامنة */
+function capturePlans(): Record<string, PushPlan> {
+  const plans: Record<string, PushPlan> = {}
+  for (const t of INSERT_ORDER) {
+    try {
+      plans[t] = planPush(TRANSPORT, t, readLocalRows(t))
+    } catch (e) {
+      console.error(`[SYNC:mysql] تخطيط ${t} فشل:`, e instanceof Error ? e.message : e)
+      plans[t] = { upsert: [], deletes: [] }
+    }
+  }
+  return plans
+}
+
+async function pushPlans(
+  c: mysql.Connection,
+  plans: Record<string, PushPlan>
+): Promise<{ pushed: number; removed: number; bad: Set<string> }> {
+  const bad = new Set<string>()
+  let pushed = 0
+  let removed = 0
+
+  for (const t of INSERT_ORDER) {
+    const plan = plans[t]
+    if (!plan || plan.upsert.length === 0) continue
+    const cols = Object.keys(plan.upsert[0])
+    const values = plan.upsert.map((r) => cols.map((cc) => mysqlValue(r[cc])))
+    const upd = cols.map((cc) => `\`${cc}\`=VALUES(\`${cc}\`)`).join(', ')
+    try {
+      await c.query(
+        `INSERT INTO \`${t}\` (${cols.map((cc) => `\`${cc}\``).join(',')}) VALUES ? ON DUPLICATE KEY UPDATE ${upd}`,
+        [values]
+      )
+      pushed += plan.upsert.length
+      console.log(`[SYNC:mysql] push ${t}: رفع ${plan.upsert.length} صفاً متغيّراً ✓`)
+    } catch (e) {
+      console.error(`[SYNC:mysql] push/${t} فشل:`, e instanceof Error ? e.message : e)
+      bad.add(t)
+    }
+  }
+
+  for (const t of DELETE_ORDER) {
+    if (bad.has(t)) continue
+    const deletes = plans[t]?.deletes ?? []
+    if (deletes.length === 0) continue
+    const col = pkColumn(t)
+    try {
+      for (let i = 0; i < deletes.length; i += 500) {
+        await c.query(`DELETE FROM \`${t}\` WHERE \`${col}\` IN (?)`, [deletes.slice(i, i + 500)])
+      }
+      removed += deletes.length
+      console.log(`[SYNC:mysql] push ${t}: حذف ${deletes.length} صفاً من البعيد (حُذفت محلياً) ✓`)
+    } catch (e) {
+      console.error(`[SYNC:mysql] push/حذف ${t} فشل:`, e instanceof Error ? e.message : e)
+      bad.add(t)
+    }
+  }
+
+  return { pushed, removed, bad }
+}
+
 export async function mysqlPush(): Promise<string> {
   const c = await connect()
   try {
     await ensureSchema(c)
+    const plans = capturePlans()
     await c.query('SET FOREIGN_KEY_CHECKS=0')
     try {
-      const bad = new Set<string>()
-      let pushed = 0
-      let removed = 0
-
-      // رفع الصفوف الجديدة/المعدلة فقط (upsert بالمفتاح الأساسي)
-      for (const t of INSERT_ORDER) {
-        if (bad.has(t)) continue
-        let plan: ReturnType<typeof planPush>
-        try {
-          plan = planPush(TRANSPORT, t, readLocalRows(t))
-        } catch (e) {
-          console.error(`[SYNC:mysql] push/تخطيط ${t} فشل:`, e instanceof Error ? e.message : e)
-          bad.add(t)
-          continue
-        }
-        if (plan.upsert.length === 0) continue
-        const cols = Object.keys(plan.upsert[0])
-        const values = plan.upsert.map((r) => cols.map((cc) => mysqlValue(r[cc])))
-        const upd = cols.map((cc) => `\`${cc}\`=VALUES(\`${cc}\`)`).join(', ')
-        try {
-          await c.query(`INSERT INTO \`${t}\` (${cols.map((cc) => `\`${cc}\``).join(',')}) VALUES ? ON DUPLICATE KEY UPDATE ${upd}`, [values])
-          pushed += plan.upsert.length
-          console.log(`[SYNC:mysql] push ${t}: رفع ${plan.upsert.length} صفاً متغيّراً ✓`)
-        } catch (e) {
-          console.error(`[SYNC:mysql] push/${t} فشل:`, e instanceof Error ? e.message : e)
-          bad.add(t)
-        }
-      }
-
-      // حذف الصفوف المحذوفة محلياً (الأبناء قبل الآباء)
-      for (const t of DELETE_ORDER) {
-        if (bad.has(t)) continue
-        let deletes: (string | number)[] = []
-        try {
-          deletes = planPush(TRANSPORT, t, readLocalRows(t)).deletes
-        } catch {
-          bad.add(t)
-          continue
-        }
-        if (deletes.length === 0) continue
-        const col = pkColumn(t)
-        try {
-          for (let i = 0; i < deletes.length; i += 500) {
-            await c.query(`DELETE FROM \`${t}\` WHERE \`${col}\` IN (?)`, [deletes.slice(i, i + 500)])
-          }
-          removed += deletes.length
-          console.log(`[SYNC:mysql] push ${t}: حذف ${deletes.length} صفاً من البعيد (حُذفت محلياً) ✓`)
-        } catch (e) {
-          console.error(`[SYNC:mysql] push/حذف ${t} فشل:`, e instanceof Error ? e.message : e)
-          bad.add(t)
-        }
-      }
-
-      // تحديث baseline للجداول الناجحة فقط
+      const { pushed, removed, bad } = await pushPlans(c, plans)
       for (const t of INSERT_ORDER) {
         if (bad.has(t)) continue
         try {
@@ -252,7 +266,6 @@ export async function mysqlPush(): Promise<string> {
           /* best effort */
         }
       }
-
       if (bad.size > 0) {
         throw new Error(`فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`)
       }
@@ -260,6 +273,57 @@ export async function mysqlPush(): Promise<string> {
     } finally {
       await c.query('SET FOREIGN_KEY_CHECKS=1')
     }
+  } finally {
+    await c.end()
+  }
+}
+
+/**
+ * مزامنة MySQL ثنائية الاتجاه: تسحب تغييرات الخادم وتدمجها (المحلي يفوز عند التعارض)
+ * ثم ترفع تغييرات المحلي. تُعيد عدد الصفوف التي غيّرها السحب.
+ */
+export async function mysqlSync(): Promise<number> {
+  const c = await connect()
+  try {
+    await ensureSchema(c)
+    const plans = capturePlans()
+
+    const data: Record<string, Record<string, unknown>[]> = {}
+    let remote = 0
+    for (const t of SYNC_TABLES) {
+      const [rows] = (await c.query(`SELECT * FROM \`${t}\``)) as unknown as [
+        Record<string, string | number | null | Date>[],
+        unknown
+      ]
+      data[t] = rows as unknown as Record<string, unknown>[]
+      remote += rows.length
+    }
+    if (remote > 0) {
+      const counts = mergeIntoLocal(TRANSPORT, data, DELETE_ORDER, INSERT_ORDER)
+      lastPullChanged = counts.inserted + counts.updated + counts.deleted
+    } else {
+      lastPullChanged = 0
+    }
+
+    await c.query('SET FOREIGN_KEY_CHECKS=0')
+    try {
+      const { pushed, removed, bad } = await pushPlans(c, plans)
+      for (const t of INSERT_ORDER) {
+        if (bad.has(t)) continue
+        try {
+          saveBaseline(TRANSPORT, t, readLocalRows(t))
+        } catch {
+          /* best effort */
+        }
+      }
+      if (bad.size > 0) {
+        throw new Error(`فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`)
+      }
+      console.log(`[SYNC:mysql] sync انتهى: سحب ${lastPullChanged} صفاً، رفع ${pushed}، حذف ${removed}`)
+    } finally {
+      await c.query('SET FOREIGN_KEY_CHECKS=1')
+    }
+    return lastPullChanged
   } finally {
     await c.end()
   }

@@ -93,29 +93,45 @@ export function planPush(
   return { upsert, deletes }
 }
 
-/** حذف محلي فقط للصفوف التي كانت متزامنة سابقاً واختفى نظيرها البعيد */
+/**
+ * حذف محلي للصفوف التي كانت متزامنة سابقاً واختفت من البعيد (حُذفت هناك).
+ * لا نحذف صفاً عدّله المستخدم محلياً بعد آخر مزامنة (المحلي يفوز — سيُرفع مجدداً).
+ */
 export function mergeDeletes(transport: string, tbl: string, remoteRows: Record<string, unknown>[]): number {
   assertSafeName(tbl)
   const baseline = readBaseline(transport, tbl)
   if (baseline.size === 0) return 0
+  const pk = pkColumn(tbl)
+  const db = getDb()
   const remote = new Set<string>()
   for (const r of remoteRows) {
-    const id = String((r as Record<string, unknown>)[pkColumn(tbl)] ?? '')
+    const id = String((r as Record<string, unknown>)[pk] ?? '')
     if (id !== '') remote.add(id)
   }
-  const db = getDb()
-  const del = db.prepare(`DELETE FROM \`${tbl}\` WHERE \`${pkColumn(tbl)}\`=?`)
+  const localSig = new Map<string, string>()
+  for (const r of db.prepare(`SELECT * FROM \`${tbl}\``).all() as unknown as Record<string, unknown>[]) {
+    localSig.set(String((r as Record<string, unknown>)[pk] ?? ''), rowSig(r))
+  }
+  const del = db.prepare(`DELETE FROM \`${tbl}\` WHERE \`${pk}\`=?`)
   let deleted = 0
-  for (const id of baseline.keys()) {
-    if (!remote.has(id)) {
-      del.run(id)
-      deleted++
-    }
+  for (const [id, baseSig] of baseline) {
+    if (remote.has(id)) continue
+    const localV = localSig.get(id)
+    if (localV === undefined) continue // محذوف محلياً أصلاً
+    if (localV !== baseSig) continue // المصدر عدّله محلياً بعد آخر مزامنة → المحلي يفوز
+    del.run(id)
+    deleted++
   }
   return deleted
 }
 
-/** إدراج/تحديث الصفوف المتغيرة فقط في مكانها (بدون مسح الجدول) */
+/**
+ * إدراج/تحديث الصفوف القادمة من البعيد فقط عند الحاجة، مع قاعدة «المحلي يفوز»:
+ * - صف جديد على البعيد → يُدرج.
+ * - صف عدّله البعيد ولم يُعدّله المحلي → يُحدّث.
+ * - صف عدّله المحلي (متسخ) → يُترك (سيُرفع).
+ * - صف حذفه المحلي (غير موجود محلياً لكنه في الأساس) → يُترك (سيُحذف من البعيد).
+ */
 export function mergeUpserts(
   transport: string,
   tbl: string,
@@ -124,6 +140,7 @@ export function mergeUpserts(
   assertSafeName(tbl)
   const db = getDb()
   const pk = pkColumn(tbl)
+  const baseline = readBaseline(transport, tbl)
 
   const localRows = db.prepare(`SELECT * FROM \`${tbl}\``).all() as unknown as Record<string, unknown>[]
   const localSig = new Map<string, string>()
@@ -150,14 +167,28 @@ export function mergeUpserts(
         updStmt = db.prepare(`UPDATE \`${tbl}\` SET \`${fields.join('`,`')}\`=? WHERE \`${pk}\`=?`)
       }
     }
-    const sig = rowSig(r)
-    if (!localSig.has(id)) {
-      if (insStmt) insStmt.run(...cols.map((c) => normalizeValue(r[c])))
-      inserted++
-    } else if (localSig.get(id) !== sig) {
+    const remoteSig = rowSig(r)
+    const localV = localSig.get(id)
+    const baseSig = baseline.get(id)
+
+    if (localV === undefined) {
+      // غير موجود محلياً
+      if (baseSig === undefined) {
+        // صف جديد من البعيد
+        if (insStmt) insStmt.run(...cols.map((c) => normalizeValue(r[c])))
+        inserted++
+      }
+      // موجود في الأساس لكن غائب محلياً = حذفه المستخدم محلياً → لن نُعيده
+      continue
+    }
+
+    const localDirty = localV !== baseSig
+    const remoteDirty = remoteSig !== baseSig
+    if (!localDirty && remoteDirty) {
       if (updStmt) updStmt.run(...fields.map((c) => normalizeValue(r[c])), id)
       updated++
     }
+    // localDirty → المحلي يفوز، لا نلمسه
   }
   return { inserted, updated }
 }

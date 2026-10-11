@@ -246,36 +246,37 @@ async function deleteIds(cfg: CloudConfig, t: string, ids: (string | number)[]):
   return removed
 }
 
-export async function cloudPush(): Promise<string> {
-  const cfg = cloudConfig()
-  if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
-  console.log(`[SYNC:cloud] push يبدأ (المفتاح: ${maskedKey()}, الرابط: ${cfg.rest})`)
+interface PushPlan {
+  upsert: Record<string, unknown>[]
+  deletes: (string | number)[]
+}
 
-  // الرفع تفرّقي: نرسل فقط الصفوف الجديدة/المعدلة، ونحذف الصفوف المحذوفة محلياً
+/** يلتقط تغييرات الطرف المحلي (الجديدة/المعدلة/المحذوفة) بالنسبة لآخر مزامنة */
+function capturePlans(): Record<string, PushPlan> {
+  const plans: Record<string, PushPlan> = {}
+  for (const t of INSERT_ORDER) {
+    try {
+      plans[t] = planPush(TRANSPORT, t, readLocalTable(t))
+    } catch (e) {
+      diagnoseCloud(`تخطيط ${t}`, e)
+      plans[t] = { upsert: [], deletes: [] }
+    }
+  }
+  return plans
+}
+
+/** يرفع خططاً ملتقطة مسبقاً: upsert للصفوف المتغيرة، ثم حذف الصفوف المحذوفة محلياً */
+async function pushPlans(
+  cfg: CloudConfig,
+  plans: Record<string, PushPlan>
+): Promise<{ pushed: number; removed: number; bad: Set<string> }> {
   const bad = new Set<string>()
   let pushed = 0
   let removed = 0
 
-  // 1) رفع/تحديث الصفوف المتغيرة (الآباء قبل الأبناء)
   for (const t of INSERT_ORDER) {
-    if (bad.has(t)) continue
-    let rows: Record<string, unknown>[]
-    try {
-      rows = readLocalTable(t)
-    } catch (e) {
-      diagnoseCloud(`push/قراءة ${t}`, e)
-      bad.add(t)
-      continue
-    }
-    let plan: ReturnType<typeof planPush>
-    try {
-      plan = planPush(TRANSPORT, t, rows)
-    } catch (e) {
-      diagnoseCloud(`push/تخطيط ${t}`, e)
-      bad.add(t)
-      continue
-    }
-    if (plan.upsert.length === 0) continue
+    const plan = plans[t]
+    if (!plan || plan.upsert.length === 0) continue
     try {
       const res = await request(cfg, `/${t}`, {
         method: 'POST',
@@ -291,17 +292,9 @@ export async function cloudPush(): Promise<string> {
     }
   }
 
-  // 2) حذف الصفوف المحذوفة محلياً (الأبناء قبل الآباء)
   for (const t of DELETE_ORDER) {
     if (bad.has(t)) continue
-    let deletes: (string | number)[] = []
-    try {
-      deletes = planPush(TRANSPORT, t, readLocalTable(t)).deletes
-    } catch (e) {
-      diagnoseCloud(`push/تخطيط حذف ${t}`, e)
-      bad.add(t)
-      continue
-    }
+    const deletes = plans[t]?.deletes ?? []
     if (deletes.length === 0) continue
     try {
       const n = await deleteIds(cfg, t, deletes)
@@ -313,17 +306,10 @@ export async function cloudPush(): Promise<string> {
     }
   }
 
-  // 3) تحديث baseline للجداول الناجحة فقط (أي فشل يُعاد محاولته الدورة القادمة)
-  for (const t of INSERT_ORDER) {
-    if (bad.has(t)) continue
-    try {
-      saveBaseline(TRANSPORT, t, readLocalTable(t))
-    } catch (e) {
-      console.warn(`[SYNC:cloud] push: تعذّر حفظ baseline ${t}`, e instanceof Error ? e.message : e)
-    }
-  }
+  return { pushed, removed, bad }
+}
 
-  // تصحيح تسلسلات المعرّفات على الخادم
+async function resetSequences(cfg: CloudConfig): Promise<void> {
   try {
     const res = await request(cfg, '/rpc/reset_sequences', { method: 'POST', body: '{}' })
     if (!res.ok) {
@@ -335,16 +321,80 @@ export async function cloudPush(): Promise<string> {
   } catch (e) {
     console.warn('[SYNC:cloud] reset_sequences فشل (غير مميت)', e instanceof Error ? e.message : e)
   }
+}
+
+export async function cloudPush(): Promise<string> {
+  const cfg = cloudConfig()
+  if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
+  console.log(`[SYNC:cloud] push يبدأ (المفتاح: ${maskedKey()}, الرابط: ${cfg.rest})`)
+
+  const plans = capturePlans()
+  const { pushed, removed, bad } = await pushPlans(cfg, plans)
+
+  for (const t of INSERT_ORDER) {
+    if (bad.has(t)) continue
+    try {
+      saveBaseline(TRANSPORT, t, readLocalTable(t))
+    } catch (e) {
+      console.warn(`[SYNC:cloud] push: تعذّر حفظ baseline ${t}`, e instanceof Error ? e.message : e)
+    }
+  }
+
+  await resetSequences(cfg)
 
   if (bad.size > 0) {
     const msg = `فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`
     console.error(`[SYNC:cloud] push: ${msg}`)
     throw new Error(msg)
   }
-  console.log(
-    `[SYNC:cloud] push انتهى: ${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً في ${INSERT_ORDER.length} جداول`
-  )
+  console.log(`[SYNC:cloud] push انتهى: ${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً`)
   return `تم رفع التعديلات إلى Supabase Postgres (${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً)`
+}
+
+/**
+ * مزامنة ثنائية الاتجاه: يسحب تغييرات البعيد ويدمجها (المحلي يفوز عند التعارض)،
+ * ثم يرفع تغييرات المحلي — فتنتقل التعديلات والحذوفات بين الأجهزة في كل دورة.
+ * تُعيد عدد الصفوف التي غيّرها السحب.
+ */
+export async function cloudSync(): Promise<number> {
+  const cfg = cloudConfig()
+  if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
+
+  // 1) التقط تغييرات المحلي قبل أي دمج
+  const plans = capturePlans()
+
+  // 2) اسحب كل الجداول وادمج التغييرات في مكانها
+  const data: Record<string, Record<string, unknown>[]> = {}
+  const failed: string[] = []
+  for (const t of SYNC_TABLES) {
+    try {
+      data[t] = await fetchTable(cfg, t)
+    } catch (e) {
+      diagnoseCloud(`sync/جلب ${t}`, e)
+      failed.push(t)
+    }
+  }
+  const counts = mergeIntoLocal(TRANSPORT, data, DELETE_ORDER, INSERT_ORDER, failed)
+  lastPullChanged = counts.inserted + counts.updated + counts.deleted
+
+  // 3) ارفع تغييرات المحلي التي التقطناها قبل الدمج
+  const { pushed, removed, bad } = await pushPlans(cfg, plans)
+
+  // 4) حدّث baseline من الحالة المحلية النهائية
+  for (const t of INSERT_ORDER) {
+    if (failed.includes(t) || bad.has(t)) continue
+    try {
+      saveBaseline(TRANSPORT, t, readLocalTable(t))
+    } catch {
+      /* best effort */
+    }
+  }
+
+  await resetSequences(cfg)
+  console.log(
+    `[SYNC:cloud] sync انتهى: سحب(${counts.inserted} إدراج، ${counts.updated} تحديث، ${counts.deleted} حذف) / رفع(${pushed} محدث، ${removed} محذوف)`
+  )
+  return lastPullChanged
 }
 
 async function fetchTable(cfg: CloudConfig, t: string): Promise<Record<string, unknown>[]> {
