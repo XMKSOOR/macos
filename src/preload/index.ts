@@ -205,7 +205,12 @@ records: {
     driveUpload: (): Promise<string> => invoke('sync:driveUpload'),
     driveDownload: (): Promise<string> => invoke('sync:driveDownload'),
     driveStatus: (): Promise<{ connected: boolean; config: boolean }> => invoke('sync:driveStatus'),
-    driveClear: (): Promise<boolean> => invoke('sync:driveClear')
+    driveClear: (): Promise<boolean> => invoke('sync:driveClear'),
+    onRefresh: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on('sync:refreshed', listener)
+      return () => ipcRenderer.removeListener('sync:refreshed', listener)
+    }
   },
   mysql: {
     test: (): Promise<string> => invoke('mysql:test'),

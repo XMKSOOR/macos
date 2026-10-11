@@ -4,6 +4,7 @@ import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { backupDatabase, getDb, replaceDbFrom } from './db'
 import { getSettings, saveSettings } from './db'
+import { snapshotFingerprint } from './syncCore'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const UPLOAD_HOST = 'https://www.googleapis.com/upload/drive/v3/files'
@@ -203,6 +204,25 @@ export async function driveDownload(): Promise<string> {
 export async function driveStatus(): Promise<{ connected: boolean; config: boolean }> {
   const cfg = configured()
   return { connected: !!getTokensRaw().access_token, config: !!cfg }
+}
+
+export interface DriveRemoteSnapshot {
+  buf: Buffer
+  hash: string
+  rows: number
+}
+
+export async function driveRemote(): Promise<DriveRemoteSnapshot | null> {
+  const headers = await authHeaders()
+  const folderId = await findFolder(headers)
+  if (!folderId) return null
+  const id = await findFile(folderId, 'clinic.db', headers)
+  if (!id) return null
+  const resp = await fetch(`${DRIVE_HOST}/files/${id}?alt=media`, { headers })
+  if (!resp.ok) return null
+  const buf = Buffer.from(await resp.arrayBuffer())
+  const fp = snapshotFingerprint(buf)
+  return { buf, hash: fp.hash, rows: fp.rows }
 }
 
 export async function driveClear(): Promise<void> {

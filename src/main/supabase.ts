@@ -24,6 +24,27 @@ export function supabaseConfig(): SupabaseConfig | null {
   return { url, key }
 }
 
+function maskedKey(): string {
+  const cfg = supabaseConfig()
+  if (!cfg) return '(غير مهيأ)'
+  return cfg.key.length > 8 ? cfg.key.slice(0, 4) + '…' + cfg.key.slice(-2) + '(len=' + cfg.key.length + ')' : '(قصير)'
+}
+
+/** يشرح في السجل سبب تعطل مزامنة Supabase (مفتاح/رابط/صلاحيات/اتصال) */
+function diagnoseSupabase(fn: string, err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err)
+  const stack = err instanceof Error && err.stack ? err.stack : ''
+  console.error(`[SYNC:supabase] ${fn} فشل: ${msg}`)
+  if (process.env['SYNC_TRACE'] === '1' && stack) console.error(`[SYNC:supabase] ${fn} STACK\n${stack}`)
+  if (/\b401\b|\b403\b|invalid.{0,10}api|jwt|apikey/i.test(msg)) {
+    console.error('[SYNC:supabase] السبب المرجّح: مفتاح API خاطئ أو صلاحيات نقص — تأكد من SUPABASE_SECRET_KEY وأن Politices/الباكت تسمح بالقراءة والكتابة.')
+  } else if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|network|يرفض/i.test(msg)) {
+    console.error('[SYNC:supabase] السبب المرجّح: مشكلة اتصال بالشبكة أو حجب Domain Dining — تحقق من الإنترنت ومن عنوان المشروع.')
+  } else if (/bucket|cors|permission|forbidden/i.test(msg)) {
+    console.error('[SYNC:supabase] السبب المرجّح: الباكت غير موجود أو صلاحياته لا تسمح بهذه العملية.')
+  }
+}
+
 let client: StorageClient | null = null
 let clientKey = ''
 
@@ -116,16 +137,26 @@ function backupBeforeImport(): void {
   }
 }
 
-async function fetchRemoteBuffer(): Promise<Buffer | null> {
+export async function fetchRemoteBuffer(): Promise<Buffer | null> {
+  const cfg = supabaseConfig()
+  if (!cfg) {
+    console.warn('[SYNC:supabase] لا يوجد رابط/مفتاح مُهيّأ — لن تتم مزامنة Supabase. ضع SUPABASE_SECRET_KEY في .env أو resources/app.env أو في الإعدادات.')
+    return null
+  }
   const c = getClient()
   await ensureBucket(c)
   const { data: files, error } = await c.from(BUCKET).list('')
   if (error) throw new Error(error.message)
-  if (!files?.some((f) => f.name === DB_FILE)) return null
+  if (!files?.some((f) => f.name === DB_FILE)) {
+    console.log(`[SYNC:supabase] fetchRemoteBuffer: لا يوجد ملف clinic.db في الباكت (${(files ?? []).length} ملفاً موجوداً)`)
+    return null
+  }
   const { data: blob, error: e2 } = await c.from(BUCKET).download(DB_FILE)
   if (e2) throw new Error(e2.message)
   if (!blob) return null
-  return Buffer.from(await blob.arrayBuffer())
+  const buf = Buffer.from(await blob.arrayBuffer())
+  console.log(`[SYNC:supabase] fetchRemoteBuffer: تم تنزيل ${buf.length} بايت من الباكت`)
+  return buf
 }
 
 function applyRemoteBuffer(buf: Buffer): void {
@@ -143,23 +174,47 @@ function applyRemoteBuffer(buf: Buffer): void {
   }
 }
 
+export async function supabaseRemoteFp(): Promise<{ hash: string; rows: number } | null> {
+  const buf = await fetchRemoteBuffer()
+  if (!buf) return null
+  const fp = snapshotFingerprint(buf)
+  console.log(`[SYNC:supabase] البصمة البعيدة: rows=${fp.rows} hash=${fp.hash.slice(0, 12)}…`)
+  return fp
+}
+
 export async function supabasePush(): Promise<string> {
+  const cfg = supabaseConfig()
+  if (!cfg) throw new Error('أدخل عنوان المشروع والمفتاح السري لـ Supabase في الإعدادات أولاً')
+  console.log(`[SYNC:supabase] push يبدأ (المفتاح: ${maskedKey()}, الرابط: ${cfg.url})`)
   const c = getClient()
-  await ensureBucket(c)
+  try {
+    await ensureBucket(c)
+  } catch (e) {
+    diagnoseSupabase('ensureBucket', e)
+    throw e
+  }
   const fp = fingerprintDb()
   const buf = snapshotBuffer()
+  console.log(`[SYNC:supabase] push: رفع ${buf.length} بايت، rows=${fp.rows}, hash=${fp.hash.slice(0, 12)}…`)
   const { error } = await c.from(BUCKET).upload(DB_FILE, new Uint8Array(buf), {
     upsert: true,
     contentType: 'application/vnd.sqlite3'
   })
-  if (error) throw new Error(error.message)
+  if (error) {
+    diagnoseSupabase('upload DB', error)
+    throw new Error(error.message)
+  }
   const meta = JSON.stringify({ hash: fp.hash, rows: fp.rows, uploadedAt: new Date().toISOString() })
   const { error: e2 } = await c.from(BUCKET).upload(META_FILE, meta, {
     upsert: true,
     contentType: 'application/json'
   })
-  if (e2) throw new Error(e2.message)
+  if (e2) {
+    diagnoseSupabase('upload META', e2)
+    throw new Error(e2.message)
+  }
   writeState(fp.hash, fp.hash)
+  console.log('[SYNC:supabase] push: تم رفع قاعدة البيانات + meta بنجاح')
   return `تم رفع نسخة كاملة إلى Supabase (${fp.rows} صف)`
 }
 
@@ -169,16 +224,20 @@ export async function supabasePull(): Promise<string> {
   applyRemoteBuffer(buf)
   const fp = fingerprintDb()
   writeState(fp.hash, fp.hash)
+  console.log(`[SYNC:supabase] pull: طُبّق buffer، rows=${fp.rows}, hash=${fp.hash.slice(0, 12)}…`)
   return `تم سحب نسخة كاملة من Supabase واستبدال قاعدة البيانات المحلية (${fp.rows} صف)`
 }
 
 export async function supabasePushOnQuit(): Promise<void> {
   if (process.env['SKIP_SYNC'] === '1') return
-  if (!supabaseConfig()) return
+  if (!supabaseConfig()) {
+    console.warn('[SYNC:supabase] عند الإغلاق: التكوين غير مكتمل — لن يتم الرفع')
+    return
+  }
   try {
     await supabasePush()
-  } catch {
-    /* best effort */
+  } catch (e) {
+    diagnoseSupabase('pushOnQuit', e)
   }
 }
 
@@ -188,12 +247,16 @@ export async function supabasePushOnQuit(): Promise<void> {
  */
 export async function supabasePullOnStart(): Promise<void> {
   if (process.env['SKIP_SYNC'] === '1') return
-  if (!supabaseConfig()) return
+  if (!supabaseConfig()) {
+    console.warn('[SYNC:supabase] عند الإقلاع: التكوين غير مكتمل — لن يتم السحب')
+    return
+  }
 
   let buf: Buffer | null = null
   try {
     buf = await fetchRemoteBuffer()
-  } catch {
+  } catch (e) {
+    diagnoseSupabase('pullOnStart/fetchRemote', e)
     return // لا اتصال / لا صلاحية — نُبقي النسخة المحلية
   }
 

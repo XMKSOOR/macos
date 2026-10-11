@@ -5,11 +5,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { initDb, listDueRecurringExpenses, materializeDueRecurringExpenses } from './db'
 import { registerIpc } from './ipc'
-import { drivePullOnStart, driveSyncOnQuit } from './sync'
-import { mysqlPullOnStart, mysqlPushOnQuit } from './mysql'
-import { supabasePullOnStart, supabasePushOnQuit } from './supabase'
-import { cloudPullOnStart, cloudPushOnQuit } from './cloud'
-import { startAutoSync } from './autoSync'
+import { startAutoSync, syncAllOnQuit, syncAllOnStart } from './autoSync'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
 
@@ -20,9 +16,14 @@ const isDev = !!process.env['ELECTRON_RENDERER_URL']
 function loadPackagedEnv(): void {
   try {
     const p = join(process.resourcesPath, 'app.env')
-    if (existsSync(p)) loadEnv({ path: p })
-  } catch {
-    /* ignore */
+    if (existsSync(p)) {
+      loadEnv({ path: p })
+      console.log('[ENV] تم تحميل app.env من موارد الحزمة')
+    } else {
+      console.warn('[ENV] لا يوجد resources/app.env — مفاتيح Supabase في النُسخ المثبّتة تأتي من .env فقط. إذا كانت المزامنة لا تعمل، أنشئ هذا الملف بالمفتاح.')
+    }
+  } catch (e) {
+    console.error('[ENV] فشل تحميل app.env:', e instanceof Error ? e.message : e)
   }
 }
 
@@ -145,12 +146,7 @@ app.whenReady().then(() => {
   void runRecurringOnStart()
   createWindow()
   loadPackagedEnv()
-  void drivePullOnStart()
-  void mysqlPullOnStart()
-  void (async () => {
-    await supabasePullOnStart()
-    await cloudPullOnStart()
-  })()
+  void syncAllOnStart()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -158,10 +154,13 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', (e) => {
-  if (!(process.env['SKIP_SYNC'] === '1')) {
-    e.preventDefault()
-    Promise.all([driveSyncOnQuit(), mysqlPushOnQuit(), supabasePushOnQuit(), cloudPushOnQuit()]).finally(() => app.exit(0))
-  }
+  if (process.env['SKIP_SYNC'] === '1') return
+  e.preventDefault()
+  const guard = setTimeout(() => app.exit(0), 20000)
+  syncAllOnQuit().finally(() => {
+    clearTimeout(guard)
+    app.exit(0)
+  })
 })
 
 app.on('window-all-closed', () => {

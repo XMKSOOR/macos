@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise'
 import { getDb, getSettings } from './db'
+import { fingerprintTables } from './syncCore'
 
 // الجداول المركّبة كاملة (نسخة معكوسة) على MySQL
 const SYNC_TABLES: string[] = [
@@ -141,6 +142,26 @@ function readLocalTable(t: string): { cols: string[]; rows: (string | number)[] 
   if (recs.length === 0) return null
   const cols = Object.keys(recs[0])
   return recs.map((r) => ({ cols, rows: cols.map((c) => r[c]) }))
+}
+
+/** بصمة النسخة البعيدة على MySQL (null إذا لم توجد بيانات بعد) */
+export async function mysqlRemoteFp(): Promise<{ hash: string; rows: number } | null> {
+  const c = await connect()
+  try {
+    await ensureSchema(c)
+    const rowsByTable: Record<string, unknown[]> = {}
+    let total = 0
+    for (const t of SYNC_TABLES) {
+      const [rows] = (await c.query(`SELECT * FROM \`${t}\``)) as unknown as [Record<string, string | number | null>[], unknown]
+      rowsByTable[t] = rows as unknown as unknown[]
+      total += rows.length
+    }
+    if (total === 0) return null
+    const fp = fingerprintTables(rowsByTable)
+    return { hash: fp.hash, rows: fp.rows }
+  } finally {
+    await c.end()
+  }
 }
 
 export async function mysqlTest(): Promise<string> {

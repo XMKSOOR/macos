@@ -84,6 +84,19 @@ export default function App(): React.JSX.Element {
     }
   }, [user])
 
+  useEffect(() => {
+    if (!user) return
+    let timer: number | undefined
+    const off = window.clinic.sync.onRefresh(() => {
+      if (timer) return
+      timer = window.setTimeout(() => window.location.reload(), 300)
+    })
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      off()
+    }
+  }, [user])
+
   const refreshSettings = useCallback(() => {
     window.clinic.settings.get().then(setSettings).catch(() => {})
   }, [])

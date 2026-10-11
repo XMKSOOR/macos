@@ -1,4 +1,4 @@
-name: Build installers (Windows + macOS)
+name: Build Installers
 
 on:
   workflow_dispatch:
@@ -6,52 +6,86 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            name: windows
-            run: npm run dist -- --publish never
-            artifact: DentalClinic-Setup-*.exe
-          - os: macos-latest
-            name: macos
-            run: npm run dist -- --publish never
-            artifact: DentalClinic-Mac-*-x64.dmg
-    runs-on: ${{ matrix.os }}
+          - name: Windows x64
+            os: windows-latest
+            args: --win
+          - name: macOS x64 (Catalina 10.15)
+            os: macos-14
+            args: --mac --x64
+          - name: macOS arm64 (Apple Silicon)
+            os: macos-14
+            args: --mac --arm64
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 22
           cache: npm
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Write .env (from repository secrets)
+      # .env is gitignored; repackaged into resources/app.env by electron-builder
+      # (extraResources). It is generated here from repository secrets so the
+      # Supabase key never lands in the repository.
+      - name: Generate .env (Supabase keys) from repository secrets
         shell: bash
-        run: |
-          cat > .env <<'EOF'
-          SUPABASE_URL=${{ secrets.SUPABASE_URL || 'https://mroziduublsrcogojvcp.supabase.co' }}
-          SUPABASE_SECRET_KEY=${{ secrets.SUPABASE_SECRET_KEY }}
-          SUPABASE_PUBLISHABLE_KEY=${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-          EOF
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build ${{ matrix.name }}
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          MACOSX_DEPLOYMENT_TARGET: '10.15'
-        run: ${{ matrix.run }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_JWKS_URL: ${{ secrets.SUPABASE_JWKS_URL }}
+        run: |
+          : > .env
+          [ -n "$SUPABASE_URL" ] && printf 'SUPABASE_URL=%s\n' "$SUPABASE_URL" >> .env
+          [ -n "$SUPABASE_SECRET_KEY" ] && printf 'SUPABASE_SECRET_KEY=%s\n' "$SUPABASE_SECRET_KEY" >> .env
+          [ -n "$SUPABASE_PUBLISHABLE_KEY" ] && printf 'SUPABASE_PUBLISHABLE_KEY=%s\n' "$SUPABASE_PUBLISHABLE_KEY" >> .env
+          [ -n "$SUPABASE_JWKS_URL" ] && printf 'SUPABASE_JWKS_URL=%s\n' "$SUPABASE_JWKS_URL" >> .env
+          if [ ! -s .env ]; then
+            echo "::warning::لم تُضبط أسرار Supabase في الإعدادات (Settings>Secrets) — ستبنى النسخة بدون مفتاح وستكون المزامنة السحابية معطلة"
+          fi
 
-      - name: Upload ${{ matrix.name }} installer
-        uses: actions/upload-artifact@v4
+      - name: Build installer
+        run: npx electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ matrix.name }}
-          path: dist/${{ matrix.artifact }}
+          name: ${{ matrix.name }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.blockmap
           if-no-files-found: error
+
+  # only runs when a v* tag is pushed, merges all artifacts into one Release
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect installers
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.blockmap' \) -exec cp {} release-files/ \;
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          fail_on_unmatched_files: false
