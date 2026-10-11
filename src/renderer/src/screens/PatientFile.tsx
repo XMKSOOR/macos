@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Field, Empty, CurrencyCell, Confirm, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import type { PatientFileResult, PatientAttachment, Medication, MedicationInput, Medicine } from '../lib'
 import AttachmentViewer from '../AttachmentViewer'
 import DentalRecord from './DentalRecord'
@@ -393,11 +394,15 @@ export default function PatientFile({
                     <input type="date" dir="ltr" value={form.birth_date} onChange={(e) => setF({ birth_date: e.target.value })} />
                   </Field>
                   <Field label="الجنس">
-                    <select value={form.gender} onChange={(e) => setF({ gender: e.target.value })}>
-                      <option value="">—</option>
-                      <option value="ذكر">ذكر</option>
-                      <option value="أنثى">أنثى</option>
-                    </select>
+                    <SearchSelect
+                      value={form.gender}
+                      onChange={(v) => setF({ gender: v })}
+                      options={[
+                        { value: '', label: '—' },
+                        { value: 'ذكر', label: 'ذكر' },
+                        { value: 'أنثى', label: 'أنثى' }
+                      ]}
+                    />
                   </Field>
                   <Field label="رقم الهاتف">
                     <input dir="ltr" value={form.phone} onChange={(e) => setF({ phone: e.target.value })} />
@@ -680,22 +685,24 @@ export default function PatientFile({
           <div className="flex" style={{ gap: 12, marginBottom: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ flex: 1, minWidth: 240 }}>
               <Field label="اختر من قائمة الأدوية الجاهزة (تعبئة تلقائية)">
-                <select value="" onChange={(e) => applyCatalog(e.target.value)}>
-                  <option value="">— اختر دواءً لتعبئة الحقول —</option>
-                  {MED_CATEGORIES.map((cat) => {
-                    const items = catalog.filter((c) => c.category === cat.value)
-                    return items.length ? (
-                      <optgroup key={cat.value} label={cat.label}>
-                        {items.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.trade_name || c.scientific_name}
-                            {c.dose ? ` — ${c.dose}` : ''}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ) : null
-                  })}
-                </select>
+                <SearchSelect
+                  value=""
+                  placeholder="— اختر دواءً لتعبئة الحقول —"
+                  onChange={(v) => {
+                    if (v) applyCatalog(v)
+                  }}
+                  options={[
+                    { value: '', label: '— اختر دواءً لتعبئة الحقول —' },
+                    ...MED_CATEGORIES.flatMap((cat) =>
+                      catalog
+                        .filter((c) => c.category === cat.value)
+                        .map((c) => ({
+                          value: c.id,
+                          label: `${cat.label}: ${c.trade_name || c.scientific_name}${c.dose ? ` — ${c.dose}` : ''}`
+                        }))
+                    )
+                  ]}
+                />
               </Field>
             </div>
             <button type="button" className="soft" onClick={saveToCatalog}>
@@ -728,19 +735,21 @@ export default function PatientFile({
               <input type="date" dir="ltr" value={medEdit.end_date} onChange={(e) => setM({ end_date: e.target.value })} />
             </Field>
             <Field label="التصنيف">
-              <select value={medEdit.category} onChange={(e) => setM({ category: e.target.value as MedicationInput['category'] })}>
-                {MED_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={medEdit.category}
+                onChange={(v) => setM({ category: v as MedicationInput['category'] })}
+                options={MED_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+              />
             </Field>
             <Field label="الحالة">
-              <select value={medEdit.active ? '1' : '0'} onChange={(e) => setM({ active: Number(e.target.value) })}>
-                <option value="1">فعّال (يتناوله حالياً)</option>
-                <option value="0">متوقف</option>
-              </select>
+              <SearchSelect
+                value={medEdit.active ? '1' : '0'}
+                onChange={(v) => setM({ active: Number(v) })}
+                options={[
+                  { value: '1', label: 'فعّال (يتناوله حالياً)' },
+                  { value: '0', label: 'متوقف' }
+                ]}
+              />
             </Field>
             <Field label="اسم الطبيب المعالج">
               <input value={medEdit.prescriber} onChange={(e) => setM({ prescriber: e.target.value })} />

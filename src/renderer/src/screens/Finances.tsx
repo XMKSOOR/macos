@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Field, useToast } from '../ui'
 import type { Appointment, CatalogItem, Expense, Invoice, Material, Settings } from '../lib'
 import { fmt, toLatinDigits, sanitizeNumberInput, parseNumber } from '../lib'
@@ -75,15 +75,50 @@ export default function Finances({ settings }: { settings: Settings | null }): R
   const [materials, setMaterials] = useState<Material[]>([])
   const toast = useToast()
 
-  const savePlan = useCallback((p: PlanState): void => {
+  const latestPlanRef = useRef<PlanState>(plan)
+  latestPlanRef.current = plan
+  const saveTimerRef = useRef<number | null>(null)
+
+  const persistPlan = useCallback((p: PlanState): void => {
     window.clinic.settings
       .save({ feasibility_plan: JSON.stringify(p) })
+      .then(() => {
+        if (latestPlanRef.current === p) setDirty(false)
+      })
       .catch(() => {})
   }, [])
 
+  /** حفظ لحظي: يُكتب التغيير للقاعدة تلقائياً بعد توقّف الكتابة */
+  const scheduleSave = useCallback((): void => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null
+      persistPlan(latestPlanRef.current)
+    }, 600)
+  }, [persistPlan])
+
+  /** حفظ فوري لأي تغيير متبقٍّ (عند مغادرة الحقل) */
+  const flushSave = useCallback((): void => {
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = null
+    }
+    persistPlan(latestPlanRef.current)
+  }, [persistPlan])
+
+  useEffect(() => {
+    const timer = saveTimerRef.current
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const saveNow = (): void => {
-    savePlan(plan)
-    setDirty(false)
+    flushSave()
     toast('تم حفظ إعدادات الخطة', 'success')
   }
 
@@ -140,8 +175,13 @@ export default function Finances({ settings }: { settings: Settings | null }): R
   }, [])
 
   const applyPlan = (patch: Partial<PlanState>): void => {
-    setPlan((p) => ({ ...p, ...patch }))
+    setPlan((p) => {
+      const next = { ...p, ...patch }
+      latestPlanRef.current = next
+      return next
+    })
     setDirty(true)
+    scheduleSave()
   }
 
   // ---- المتغيرات التلقائية + الموتر الحسابي ----
@@ -425,7 +465,7 @@ export default function Finances({ settings }: { settings: Settings | null }): R
           <div className="muted" style={{ fontSize: 12 }}>
             تكتب هنا فقط: <b>رأس المال</b> و<b>المدة</b> و<b>تاريخ البداية</b> — كل ما عداه يُحتسب تلقائياً من فواتيرك ومخزونك ومواعيدك.
           </div>
-          <button onClick={saveNow} disabled={!dirty} title="حفظ إعدادات الخطة">
+          <button onClick={saveNow} disabled={!dirty} title="تُحفظ المدخلات تلقائياً أثناء الكتابة — هذا الزر يدوي للتدقيق">
             {dirty ? 'حفظ' : 'محفوظ'}
           </button>
         </div>
@@ -440,6 +480,7 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                   value={plan.capital}
                   onChange={(e) => applyPlan({ capital: sanitizeNumberInput(e.target.value) })}
                   onFocus={(e) => e.target.select()}
+                  onBlur={flushSave}
                   placeholder="1040000"
                 />
                 <span className="dual-unit">ل.س</span>
@@ -460,7 +501,10 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                   const n = Math.floor(parseNumber(clean))
                   if (Number.isFinite(n) && n >= 1) applyPlan({ numMonths: Math.min(36, n) })
                 }}
-                onBlur={() => setMonthsDraft(null)}
+                onBlur={() => {
+                  setMonthsDraft(null)
+                  flushSave()
+                }}
               />
             </Field>
             <Field label="تاريخ بداية الخطة (Start_Date)">
@@ -470,6 +514,7 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                 onChange={(e) => {
                   if (e.target.value) applyPlan({ startDate: e.target.value })
                 }}
+                onBlur={flushSave}
               />
             </Field>
           </div>
@@ -505,8 +550,11 @@ export default function Finances({ settings }: { settings: Settings | null }): R
           <div className="value" style={{ color: src.runRate >= src.monthlyTarget ? 'var(--success)' : src.started ? 'var(--danger)' : 'var(--muted)' }}>
             {fmt(Math.round(src.runRate))}
           </div>
+          <div className="sub" dir="ltr">
+            ≈ {usd(src.runRate)}$ / شهرياً
+          </div>
           <div className="sub">
-            محسوب على {src.started} شهر منقضٍ · حرق المصاريف ≈ {fmt(Math.round(src.burn))} ل.س/شهر
+            محسوب على {src.started} شهر منقضٍ · حرق المصاريف ≈ {fmt(Math.round(src.burn))} ل.س (<span dir="ltr">{usd(src.burn)}$</span>)
           </div>
         </div>
         <div className="card">
@@ -521,6 +569,9 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                 : `≈ ${Math.ceil(src.forecastMonths)} شهر · ضمن الخطة`
               : 'يحتاج بيانات فعلية'}
           </div>
+          <div className="sub" dir="ltr">
+            المتبقي للاسترداد ≈ {usd(src.remaining)}$
+          </div>
         </div>
         <div className="card">
           <div className="label">نسبة الإنجاز (استرداد رأس المال)</div>
@@ -532,17 +583,26 @@ export default function Finances({ settings }: { settings: Settings | null }): R
           <div className="sub">
             الربح الفعلي {fmt(Math.round(src.totalActual))} من {fmt(Math.round(src.cap))} ل.س
           </div>
+          <div className="sub" dir="ltr">
+            ≈ {usd(src.totalActual)}$ من {usd(src.cap)}$
+          </div>
         </div>
         <div className="card">
           <div className="label">المتبقي لاسترداد رأس المال</div>
           <div className="value" style={{ color: src.remaining > 0 ? 'var(--primary)' : 'var(--success)' }}>
             {fmt(Math.round(src.remaining))}
           </div>
+          <div className="sub" dir="ltr">
+            ≈ {usd(src.remaining)}$
+          </div>
           <div className="sub">{src.cap > 0 ? `شهر التعادل ≈ ${src.breakEvenMonths.toFixed(1)} شهر` : 'أدخل رأس المال'}</div>
         </div>
         <div className="card">
           <div className="label">رأس المال المجمّد في المخزون</div>
           <div className="value">{fmt(Math.round(src.inventoryValue))}</div>
+          <div className="sub" dir="ltr">
+            ≈ {usd(src.inventoryValue)}$
+          </div>
           <div className="sub">{src.cap > 0 ? `${src.inventoryPct.toFixed(0)}% من رأس المال` : '—'} · {materials.length} بند</div>
         </div>
         <div className="card">
@@ -573,11 +633,13 @@ export default function Finances({ settings }: { settings: Settings | null }): R
             <div className="card">
               <div className="label">متوسط الفاتورة (Ticket)</div>
               <div className="value" style={{ fontSize: 17 }}>{fmt(Math.round(src.ticket))}</div>
+              <div className="sub" dir="ltr">≈ {usd(src.ticket)}$</div>
               <div className="sub">من {invoices.length} فاتورة منذ {src.start}</div>
             </div>
             <div className="card">
               <div className="label">متوسط المواد للحالة</div>
               <div className="value" style={{ fontSize: 17 }}>{fmt(Math.round(src.material))}</div>
+              <div className="sub" dir="ltr">≈ {usd(src.material)}$</div>
               <div className="sub">قيمة المواد المنقوصة تلقائياً من المخزون</div>
             </div>
             <div className="card">
@@ -609,6 +671,10 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                   <div className="value" style={{ fontSize: 17, color: src.fxImpact >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                     {src.fxImpact >= 0 ? '+' : ''}
                     {fmt(Math.round(src.fxImpact))}
+                  </div>
+                  <div className="sub" dir="ltr">
+                    {src.fxImpact >= 0 ? '+' : ''}
+                    {usd(src.fxImpact)}$
                   </div>
                   <div className="sub">
                     الفواتير سجّلت بسعر {fmt(Math.round(src.avgBookedRate))} · الحالي {fmt(Math.round(rate))}
@@ -696,17 +762,53 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                     <td className="muted">
                       <span dir="ltr">{m.key}</span> — {monthName(m.key)}
                     </td>
-                    <td className="amount-lbp">{fmt(Math.round(m.target))}</td>
-                    <td className="amount-lbp">{fmt(Math.round(m.gross))}</td>
-                    <td className="amount-lbp">{fmt(Math.round(m.general))}</td>
-                    <td className="amount-lbp">{fmt(Math.round(m.materials))}</td>
-                    <td className="amount-lbp" style={{ fontWeight: 700, color: m.actual >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {m.actual >= 0 ? '+' : ''}
-                      {fmt(Math.round(m.actual))}
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp">{fmt(Math.round(m.target))}</span>
+                        <span className="amount-usd" dir="ltr">{usd(m.target)}$</span>
+                      </div>
                     </td>
-                    <td className="amount-lbp" style={{ color: m.variance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                      {m.variance >= 0 ? '+' : ''}
-                      {fmt(Math.round(m.variance))}
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp">{fmt(Math.round(m.gross))}</span>
+                        <span className="amount-usd" dir="ltr">{usd(m.gross)}$</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp">{fmt(Math.round(m.general))}</span>
+                        <span className="amount-usd" dir="ltr">{usd(m.general)}$</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp">{fmt(Math.round(m.materials))}</span>
+                        <span className="amount-usd" dir="ltr">{usd(m.materials)}$</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp" style={{ fontWeight: 700, color: m.actual >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {m.actual >= 0 ? '+' : ''}
+                          {fmt(Math.round(m.actual))}
+                        </span>
+                        <span className="amount-usd" dir="ltr">
+                          {m.actual >= 0 ? '+' : ''}
+                          {usd(m.actual)}$
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp" style={{ color: m.variance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {m.variance >= 0 ? '+' : ''}
+                          {fmt(Math.round(m.variance))}
+                        </span>
+                        <span className="amount-usd" dir="ltr">
+                          {m.variance >= 0 ? '+' : ''}
+                          {usd(m.variance)}$
+                        </span>
+                      </div>
                     </td>
                     <td>
                       {m.elapsed ? (
@@ -726,15 +828,45 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                   <td colSpan={2} className="muted">
                     الإجمالي
                   </td>
-                  <td className="amount-lbp">{fmt(Math.round(src.monthlyTarget * src.monthsN))}</td>
-                  <td className="amount-lbp">{fmt(Math.round(src.totalGross))}</td>
-                  <td className="amount-lbp">{fmt(Math.round(src.totalGeneral))}</td>
-                  <td className="amount-lbp">{fmt(Math.round(src.totalMaterials))}</td>
-                  <td className="amount-lbp" style={{ fontWeight: 800 }}>
-                    {fmt(Math.round(src.totalActual))}
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp">{fmt(Math.round(src.monthlyTarget * src.monthsN))}</span>
+                      <span className="amount-usd" dir="ltr">{usd(src.monthlyTarget * src.monthsN)}$</span>
+                    </div>
                   </td>
-                  <td className="amount-lbp" style={{ fontWeight: 800, color: src.totalActual >= src.cap ? 'var(--success)' : 'var(--primary)' }}>
-                    {fmt(Math.round(src.totalActual - src.monthlyTarget * src.monthsN))}
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp">{fmt(Math.round(src.totalGross))}</span>
+                      <span className="amount-usd" dir="ltr">{usd(src.totalGross)}$</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp">{fmt(Math.round(src.totalGeneral))}</span>
+                      <span className="amount-usd" dir="ltr">{usd(src.totalGeneral)}$</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp">{fmt(Math.round(src.totalMaterials))}</span>
+                      <span className="amount-usd" dir="ltr">{usd(src.totalMaterials)}$</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp" style={{ fontWeight: 800 }}>
+                        {fmt(Math.round(src.totalActual))}
+                      </span>
+                      <span className="amount-usd" dir="ltr">{usd(src.totalActual)}$</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="money-cell">
+                      <span className="amount-lbp" style={{ fontWeight: 800, color: src.totalActual >= src.cap ? 'var(--success)' : 'var(--primary)' }}>
+                        {fmt(Math.round(src.totalActual - src.monthlyTarget * src.monthsN))}
+                      </span>
+                      <span className="amount-usd" dir="ltr">{usd(src.totalActual - src.monthlyTarget * src.monthsN)}$</span>
+                    </div>
                   </td>
                   <td />
                 </tr>
@@ -864,9 +996,24 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                       <td dir="ltr">{inv.date}</td>
                       <td>#{inv.invoice_no}</td>
                       <td>{inv.patient_name}</td>
-                      <td className="amount-lbp">{fmt(inv.total)}</td>
-                      <td className="amount-lbp">{fmt(inv.paid)}</td>
-                      <td className="amount-lbp">{fmt(Math.round(num(inv.items_cost)))}</td>
+                      <td>
+                        <div className="money-cell">
+                          <span className="amount-lbp">{fmt(inv.total)}</span>
+                          <span className="amount-usd" dir="ltr">{usd(num(inv.total))}$</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="money-cell">
+                          <span className="amount-lbp">{fmt(inv.paid)}</span>
+                          <span className="amount-usd" dir="ltr">{usd(num(inv.paid))}$</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div className="money-cell">
+                          <span className="amount-lbp">{fmt(Math.round(num(inv.items_cost)))}</span>
+                          <span className="amount-usd" dir="ltr">{usd(num(inv.items_cost))}$</span>
+                        </div>
+                      </td>
                       <td className="muted" dir="ltr">{fmt(Math.round(num(inv.usd_rate)))}</td>
                       <td>
                         {inv.status === 'paid' ? (
@@ -887,13 +1034,28 @@ export default function Finances({ settings }: { settings: Settings | null }): R
                     <td colSpan={3} className="muted">
                       الإجمالي
                     </td>
-                    <td className="amount-lbp" style={{ fontWeight: 800 }}>
-                      {fmt(invoices.reduce((s, inv) => s + num(inv.total), 0))}
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp" style={{ fontWeight: 800 }}>
+                          {fmt(invoices.reduce((s, inv) => s + num(inv.total), 0))}
+                        </span>
+                        <span className="amount-usd" dir="ltr">{usd(invoices.reduce((s, inv) => s + num(inv.total), 0))}$</span>
+                      </div>
                     </td>
-                    <td className="amount-lbp" style={{ fontWeight: 800 }}>
-                      {fmt(Math.round(src.totalGross))}
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp" style={{ fontWeight: 800 }}>
+                          {fmt(Math.round(src.totalGross))}
+                        </span>
+                        <span className="amount-usd" dir="ltr">{usd(src.totalGross)}$</span>
+                      </div>
                     </td>
-                    <td className="amount-lbp">{fmt(Math.round(src.totalMaterials))}</td>
+                    <td>
+                      <div className="money-cell">
+                        <span className="amount-lbp">{fmt(Math.round(src.totalMaterials))}</span>
+                        <span className="amount-usd" dir="ltr">{usd(src.totalMaterials)}$</span>
+                      </div>
+                    </td>
                     <td className="muted" dir="ltr">{fmt(Math.round(src.avgBookedRate))}</td>
                     <td />
                   </tr>

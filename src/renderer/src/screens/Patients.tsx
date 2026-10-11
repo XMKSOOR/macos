@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Confirm, Field, Modal, SearchBox, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import DataGrid from '../table'
 import type { Col } from '../table'
-import ExcelBar from '../excel'
+import ExcelBar, { exportNow } from '../excel'
 import type { Patient, Role, Settings } from '../lib'
 import { can, toLatinDigits, today } from '../lib'
 import PatientFile from './PatientFile'
@@ -113,8 +114,8 @@ export default function Patients({
     [load, search]
   )
 
-  const exportRows = (): Record<string, string | number>[] =>
-    list.map((p) => ({
+  const exportRows = (rows: Patient[] = list): Record<string, string | number>[] =>
+    rows.map((p) => ({
       name: p.name,
       phone: p.phone,
       gender: p.gender,
@@ -142,6 +143,23 @@ export default function Patients({
             canEdit={canEdit}
             onSave={onRowSave}
             onRowDoubleClick={(p) => setFileOf(p.id)}
+            selectable
+            onBulkDelete={
+              canDelete
+                ? async (rows) => {
+                    for (const p of rows) await window.clinic.patients.delete(p.id)
+                    toast(`تم حذف ${rows.length} مريض`, 'success')
+                    load(search)
+                  }
+                : undefined
+            }
+            onBulkExport={(rows) => {
+              void exportNow('المرضى', 'patients', exportRows(rows))
+                .then((p) => {
+                  if (p) toast('تم التصدير: ' + p, 'success')
+                })
+                .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+            }}
             emptyText="لا يوجد مرضى"
             actions={(p) => (
               <div className="actions-cell">
@@ -183,11 +201,15 @@ export default function Patients({
               <input type="date" max={today()} value={form.birth_date} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
             </Field>
             <Field label="الجنس">
-              <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
-                <option value="">—</option>
-                <option value="ذكر">ذكر</option>
-                <option value="أنثى">أنثى</option>
-              </select>
+              <SearchSelect
+                value={form.gender}
+                onChange={(v) => setForm({ ...form, gender: v })}
+                options={[
+                  { value: '', label: '—' },
+                  { value: 'ذكر', label: 'ذكر' },
+                  { value: 'أنثى', label: 'أنثى' }
+                ]}
+              />
             </Field>
             <Field label="العنوان">
               <input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />

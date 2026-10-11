@@ -66,7 +66,26 @@ export function Modal({
 }): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      // الموافقة بزر Enter في كل النوافذ: يُفعّل الزر الأساسي (حفظ/إضافة/تأكيد)
+      if (e.key !== 'Enter' || e.defaultPrevented || e.isComposing) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      if (t && t.closest('button')) return
+      const modals = document.querySelectorAll('.modal-backdrop .modal')
+      const modal = modals[modals.length - 1] as HTMLElement | undefined
+      if (!modal) return
+      const scope = (modal.querySelector('.modal-foot') ?? modal) as HTMLElement
+      const primary = (Array.from(scope.querySelectorAll('button')) as HTMLButtonElement[]).find(
+        (b) => !b.disabled && !b.classList.contains('ghost') && !b.classList.contains('danger-ghost') && !b.classList.contains('close-x')
+      )
+      if (primary) {
+        e.preventDefault()
+        primary.click()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

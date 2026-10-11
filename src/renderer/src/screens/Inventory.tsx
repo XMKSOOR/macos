@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Confirm, CurrencyCell, Empty, Field, Modal, SearchBox, useToast } from '../ui'
 import DataGrid from '../table'
 import type { Col } from '../table'
-import ExcelBar from '../excel'
+import ExcelBar, { exportNow } from '../excel'
 import type { Material, Role, Settings, StockMovement } from '../lib'
 import { can, fmt } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
@@ -152,8 +152,8 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
       .catch((e) => toast(e.message, 'error'))
   }
 
-  const exportItems = (): Record<string, string | number>[] =>
-    list.map((m) => ({
+  const exportItems = (rows: Material[] = list): Record<string, string | number>[] =>
+    rows.map((m) => ({
       name: m.name,
       category: m.category,
       unit: m.unit,
@@ -206,6 +206,23 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               onSave={onRowSave}
               moneyRate={rate}
               fixed
+              selectable
+              onBulkDelete={
+                canDelete
+                  ? async (rows) => {
+                      for (const m of rows) await window.clinic.inventory.delete(m.id)
+                      toast(`تم حذف ${rows.length} مادة`, 'success')
+                      load(search)
+                    }
+                  : undefined
+              }
+              onBulkExport={(rows) => {
+                void exportNow('مواد المخزون', 'materials', exportItems(rows))
+                  .then((p) => {
+                    if (p) toast('تم التصدير: ' + p, 'success')
+                  })
+                  .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+              }}
               emptyText="لا توجد مواد"
               actions={(m) => (
                 <>

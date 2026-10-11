@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Confirm, CurrencyCell, Empty, Field, Modal, SearchBox, StatusBadge, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import ExcelBar from '../excel'
 import type { CatalogItem, Invoice, Material, Patient, Role, Settings } from '../lib'
 import { can, fmt, today, parseNumber } from '../lib'
@@ -114,12 +115,16 @@ export default function Billing({
           <h2>الفواتير والدفعات</h2>
           <div className="toolbar">
             <SearchBox value={search} onChange={setSearch} placeholder="رقم / مريض / هاتف..." />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">كل الحالات</option>
-              <option value="unpaid">غير مدفوعة</option>
-              <option value="partial">مدفوعة جزئياً</option>
-              <option value="paid">مدفوعة</option>
-            </select>
+            <SearchSelect
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: '', label: 'كل الحالات' },
+                { value: 'unpaid', label: 'غير مدفوعة' },
+                { value: 'partial', label: 'مدفوعة جزئياً' },
+                { value: 'paid', label: 'مدفوعة' }
+              ]}
+            />
             <ExcelBar
               schema="invoices"
               title="الفواتير"
@@ -567,14 +572,14 @@ function InvoiceEditor({
     >
       <div className="form-grid" style={{ marginBottom: 16 }}>
         <Field label="المريض *">
-          <select value={patientId} onChange={(e) => setPatientId(Number(e.target.value))}>
-            <option value={0}>اختر المريض...</option>
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name} {p.phone ? `(${p.phone})` : ''}
-              </option>
-            ))}
-          </select>
+          <SearchSelect
+            value={patientId}
+            onChange={(v) => setPatientId(Number(v))}
+            options={[
+              { value: 0, label: 'اختر المريض...' },
+              ...patients.map((p) => ({ value: p.id, label: `${p.name}${p.phone ? ` (${p.phone})` : ''}` }))
+            ]}
+          />
         </Field>
         <Field label="التاريخ">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -588,20 +593,17 @@ function InvoiceEditor({
       </div>
 
       <div className="toolbar" style={{ marginBottom: 10 }}>
-        <select
+        <SearchSelect
           value=""
-          onChange={(e) => {
-            if (e.target.value) addCatalog(Number(e.target.value))
-            e.target.selectedIndex = 0
+          placeholder="+ إضافة من الكتالوج..."
+          onChange={(v) => {
+            if (v) addCatalog(Number(v))
           }}
-        >
-          <option value="">+ إضافة من الكتالوج...</option>
-          {catalog.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} — {c.price.toLocaleString('en-US')} ل.س
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: '+ إضافة من الكتالوج...' },
+            ...catalog.map((c) => ({ value: c.id, label: `${c.name} — ${c.price.toLocaleString('en-US')} ل.س` }))
+          ]}
+        />
         <button className="ghost" onClick={addBlank}>
           + بند يدوي
         </button>
@@ -691,14 +693,14 @@ function MaterialPicker({
         </div>
         <div className="modal-body">
           <div className="toolbar" style={{ marginBottom: 10 }}>
-            <select value={pick} onChange={(e) => setPick(Number(e.target.value))}>
-              <option value={0}>اختر المادة...</option>
-              {materials.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} (متوفر {m.quantity})
-                </option>
-              ))}
-            </select>
+            <SearchSelect
+              value={pick}
+              onChange={(v) => setPick(Number(v))}
+              options={[
+                { value: 0, label: 'اختر المادة...' },
+                ...materials.map((m) => ({ value: m.id, label: `${m.name} (متوفر ${m.quantity})` }))
+              ]}
+            />
             <input type="text" dir="ltr" inputMode="decimal" value={qty} onChange={(e) => setQty(Math.max(1, parseNumber(e.target.value) || 1))} style={{ width: 80 }} />
             <button className="ghost" onClick={add}>
               إضافة

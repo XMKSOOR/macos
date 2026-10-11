@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Modal, Field, Empty, CurrencyCell, Confirm, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import type { TreatmentPlan, TreatmentPlanItem, TreatmentPlanStatus, ProcedureTemplate } from '../lib'
 import { parseNumber } from '../lib'
 
@@ -285,13 +286,11 @@ export default function TreatmentPlans({ patientId, rate }: { patientId: number;
               <input value={planEdit.title} onChange={(e) => setPlanEdit({ ...planEdit, title: e.target.value })} placeholder="مثال: خطة ترميم الفك العلوي" />
             </Field>
             <Field label="الحالة">
-              <select value={planEdit.status} onChange={(e) => setPlanEdit({ ...planEdit, status: e.target.value as TreatmentPlanStatus })}>
-                {PLAN_STATUSES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={planEdit.status}
+                onChange={(v) => setPlanEdit({ ...planEdit, status: v as TreatmentPlanStatus })}
+                options={PLAN_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
+              />
             </Field>
             <div className="field full">
               <Field label="ملاحظات وموافقة المريض">
@@ -319,33 +318,27 @@ export default function TreatmentPlans({ patientId, rate }: { patientId: number;
         >
           <div className="form-grid">
             <Field label="اختر قالب إجراء (تعبئة تلقائية)">
-              <select value="" onChange={(e) => applyTemplate(e.target.value)}>
-                <option value="">— قالب —</option>
-                {Array.from(new Set(templates.map((t) => t.category))).map((cat) => (
-                  <optgroup key={cat} label={cat}>
-                    {templates
-                      .filter((t) => t.category === cat)
-                      .map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
+              <SearchSelect
+                value=""
+                placeholder="— قالب —"
+                onChange={(v) => {
+                  if (v) applyTemplate(v)
+                }}
+                options={[
+                  { value: '', label: '— قالب —' },
+                  ...templates.map((t) => ({ value: t.id, label: `${t.category} — ${t.name}` }))
+                ]}
+              />
             </Field>
             <Field label="السن (FDI)">
-              <select
+              <SearchSelect
                 value={itemEdit.draft.tooth_number}
-                onChange={(e) => setItemEdit({ ...itemEdit, draft: { ...itemEdit.draft, tooth_number: e.target.value } })}
-              >
-                <option value="">— عام / غير محدد —</option>
-                {FDI_TEETH.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setItemEdit({ ...itemEdit, draft: { ...itemEdit.draft, tooth_number: v } })}
+                options={[
+                  { value: '', label: '— عام / غير محدد —' },
+                  ...FDI_TEETH.map((t) => ({ value: t, label: String(t) }))
+                ]}
+              />
             </Field>
             <Field label="اسم الإجراء">
               <input

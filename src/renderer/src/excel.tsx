@@ -2,6 +2,15 @@ import { useState } from 'react'
 import { Modal, useToast } from './ui'
 import type { SheetSchemaKey } from './lib'
 
+/** تصدير صفوف محدَّدة إلى Excel مباشرة (يُستخدم للأعمال الجماعية). */
+export function exportNow(
+  title: string,
+  schema: SheetSchemaKey,
+  rows: Record<string, string | number>[]
+): Promise<string | null> {
+  return window.clinic.files.export({ defaultName: title, sheets: [{ name: title, schemaKey: schema, rows }] })
+}
+
 interface ExcelBarProps {
   schema: SheetSchemaKey
   title: string

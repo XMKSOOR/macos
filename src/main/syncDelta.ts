@@ -6,6 +6,18 @@ const META = '_sync_delta'
 
 const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+// مفاتيح إعدادات خاصّة بالمزامنة/الناقل — يجب ألا تنتقل إلى السحابة أبداً،
+// وإلّا تصادمت حالة المزامنة بين الأجهزة (ويندوز/ماك/الجوال) وأوقف بعضها عمل الآخر.
+const META_SETTING_KEY = /^sync_state_/
+export function isMetaSettingKey(key: string): boolean {
+  return META_SETTING_KEY.test(key) || key === 'sync_transport'
+}
+/** يُخفي صفوف الإعدادات الخاصّة بالمزامنة من الرفع/الدمج (جدول settings فقط) */
+function visibleRows(tbl: string, rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (tbl !== 'settings') return rows
+  return rows.filter((r) => !isMetaSettingKey(String((r as { key?: unknown }).key ?? '')))
+}
+
 export interface MergeCounts {
   inserted: number
   updated: number
@@ -62,7 +74,7 @@ export function saveBaseline(transport: string, tbl: string, rows: Record<string
   const pk = pkColumn(tbl)
   db.prepare(`DELETE FROM \`${META}\` WHERE transport=? AND tbl=?`).run(transport, tbl)
   const ins = db.prepare(`INSERT OR REPLACE INTO \`${META}\` (transport, tbl, id, sig) VALUES (?,?,?,?)`)
-  for (const r of rows) {
+  for (const r of visibleRows(tbl, rows)) {
     ins.run(transport, tbl, String((r as Record<string, unknown>)[pk] ?? ''), rowSig(r))
   }
 }
@@ -74,20 +86,22 @@ export function planPush(
   localRows: Record<string, unknown>[]
 ): { upsert: Record<string, unknown>[]; deletes: (string | number)[] } {
   const baseline = readBaseline(transport, tbl)
+  const rows = visibleRows(tbl, localRows)
   if (baseline.size === 0) {
     // أول رفع لهذا الجدول: نرفع كل الصفوف لتأسيس baseline
-    return { upsert: localRows, deletes: [] }
+    return { upsert: rows, deletes: [] }
   }
   const pk = pkColumn(tbl)
   const upsert: Record<string, unknown>[] = []
   const present = new Set<string>()
-  for (const r of localRows) {
+  for (const r of rows) {
     const id = String((r as Record<string, unknown>)[pk] ?? '')
     present.add(id)
     if (baseline.get(id) !== rowSig(r)) upsert.push(r)
   }
   const deletes: (string | number)[] = []
   for (const id of baseline.keys()) {
+    if (tbl === 'settings' && isMetaSettingKey(id)) continue
     if (!present.has(id)) deletes.push(id)
   }
   return { upsert, deletes }
@@ -115,6 +129,7 @@ export function mergeDeletes(transport: string, tbl: string, remoteRows: Record<
   const del = db.prepare(`DELETE FROM \`${tbl}\` WHERE \`${pk}\`=?`)
   let deleted = 0
   for (const [id, baseSig] of baseline) {
+    if (tbl === 'settings' && isMetaSettingKey(id)) continue
     if (remote.has(id)) continue
     const localV = localSig.get(id)
     if (localV === undefined) continue // محذوف محلياً أصلاً
@@ -153,7 +168,7 @@ export function mergeUpserts(
   let fields: string[] = []
   let insStmt: ReturnType<typeof db.prepare> | null = null
   let updStmt: ReturnType<typeof db.prepare> | null = null
-  for (const r of remoteRows) {
+  for (const r of visibleRows(tbl, remoteRows)) {
     const id = String((r as Record<string, unknown>)[pk] ?? '')
     if (id === '' || id === 'undefined') continue
     if (!prepared) {
@@ -224,12 +239,36 @@ export function mergeIntoLocal(
       const rows = db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
       saveBaseline(transport, t, rows)
     }
+    bumpSequences(db, insertOrder)
     db.exec('COMMIT')
   } catch (e) {
     db.exec('ROLLBACK')
     throw e
   }
   return counts
+}
+
+/**
+ * يقدّم عدّاد المعرّفات المحلي (sqlite_sequence) لكل جدول إلى أكبر معرّف موجود —
+ * بعد دمج صفوف السحابة — حتى لا يولّد السطح المكتب معرّفاً يتصادم مع صفٍّ جديد
+ * أنشأه الجوال على Postgres (وهذا كان أصل «اختفاء التعديلات»).
+ */
+function bumpSequences(db: ReturnType<typeof getDb>, tables: string[]): void {
+  for (const t of tables) {
+    try {
+      const row = db.prepare(`SELECT MAX(\`id\`) AS m FROM \`${t}\``).get() as { m?: number } | undefined
+      const max = Number(row?.m ?? 0)
+      if (!max) continue
+      const seq = db.prepare('SELECT seq FROM sqlite_sequence WHERE name=?').get(t) as { seq?: number } | undefined
+      if (seq) {
+        if (Number(seq.seq ?? 0) < max) db.prepare('UPDATE sqlite_sequence SET seq=? WHERE name=?').run(max, t)
+      } else if (t !== 'settings') {
+        db.prepare('INSERT INTO sqlite_sequence(name, seq) VALUES (?,?)').run(t, max)
+      }
+    } catch {
+      /* الجداول بلا AUTOINCREMENT لا تملك sqlite_sequence — نتجاهلها */
+    }
+  }
 }
 
 function normalizeValue(v: unknown): string | number | null {

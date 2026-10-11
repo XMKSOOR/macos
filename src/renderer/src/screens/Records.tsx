@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Confirm, Empty, Field, Modal, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 
 export function Tabs({
   tabs,
@@ -193,17 +194,12 @@ export function RecordsTab({
                       onChange={(e) => setEditing({ ...editing, [c.key]: e.target.value })}
                     />
                   ) : c.type === 'select' ? (
-                    <select
+                    <SearchSelect
                       value={String(editing[c.key] ?? '')}
-                      onChange={(e) => setEditing({ ...editing, [c.key]: e.target.value })}
-                    >
-                      <option value="">— اختر —</option>
-                      {c.options?.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                      placeholder="— اختر —"
+                      onChange={(v) => setEditing({ ...editing, [c.key]: v })}
+                      options={[{ value: '', label: '— اختر —' }, ...(c.options ?? [])]}
+                    />
                   ) : (
                     <input
                       type={c.type === 'date' ? 'date' : c.type === 'number' || c.type === 'money' ? 'number' : 'text'}

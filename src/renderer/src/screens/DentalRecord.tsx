@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Empty, Field, Modal, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import type { PatientAttachment, PeriodontalChartEntry, RecallReminder, RecallType } from '../lib'
 import Odontogram from './Odontogram'
 import TreatmentPlans from './TreatmentPlans'
@@ -334,11 +335,15 @@ function RecallTab({ patientId }: { patientId: number }): React.JSX.Element {
           }
         >
           <Field label="النوع">
-            <select value={type} onChange={(e) => setType(e.target.value as RecallType)}>
-              <option value="checkup">فحص دوري (6 أشهر)</option>
-              <option value="cleaning">تنظيف</option>
-              <option value="followup">متابعة</option>
-            </select>
+            <SearchSelect
+              value={type}
+              onChange={(v) => setType(v as RecallType)}
+              options={[
+                { value: 'checkup', label: 'فحص دوري (6 أشهر)' },
+                { value: 'cleaning', label: 'تنظيف' },
+                { value: 'followup', label: 'متابعة' }
+              ]}
+            />
           </Field>
           <Field label="تاريخ الاستحقاق">
             <input type="date" dir="ltr" value={due} onChange={(e) => setDue(e.target.value)} />

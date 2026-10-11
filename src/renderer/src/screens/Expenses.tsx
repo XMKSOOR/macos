@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Confirm, CurrencyCell, Empty, Field, Modal, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import DataGrid from '../table'
 import type { Col } from '../table'
-import ExcelBar from '../excel'
-import type { DueRecurringExpense, Expense, Recurrence, Role, Settings } from '../lib'
+import ExcelBar, { exportNow } from '../excel'
+import type { DueRecurringExpense, Expense, Material, Recurrence, Role, Settings } from '../lib'
 import { can, today } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
+import { NumberInput } from '../NumberInput'
 
 const CATEGORIES = ['رواتب وأجور', 'إيجار', 'كهرباء ومحروقات', 'أجهزة ومعدات', 'نظافة وتعقيم', 'أدوية ومواد', 'صيانة', 'أخرى']
 
@@ -70,8 +72,14 @@ export default function Expenses({ settings, role }: { settings: Settings | null
   })
   const [deleting, setDeleting] = useState<Expense | null>(null)
   const [due, setDue] = useState<DueRecurringExpense[]>([])
+  const [materials, setMaterials] = useState<Material[]>([])
+  const [linkStock, setLinkStock] = useState(false)
+  const [materialId, setMaterialId] = useState(0)
+  const [units, setUnits] = useState('')
   const toast = useToast()
   const rate = settings?.usd_rate ?? 130
+  const unitsNum = Number(units) || 0
+  const unitCost = unitsNum > 0 ? Math.round((Number(form.amount) || 0) / unitsNum) : 0
 
   const canEdit = can(role, 'edit')
   const canDelete = can(role, 'delete')
@@ -101,6 +109,13 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       .catch(() => setDue([]))
   }, [])
 
+  useEffect(() => {
+    window.clinic.inventory
+      .list()
+      .then(setMaterials)
+      .catch(() => setMaterials([]))
+  }, [])
+
   const total = list.reduce((s, e) => s + e.amount, 0)
 
   const save = (): void => {
@@ -110,6 +125,35 @@ export default function Expenses({ settings, role }: { settings: Settings | null
     }
     if (!Number(form.amount) || Number(form.amount) <= 0) {
       toast('المبلغ غير صالح', 'error')
+      return
+    }
+    const done = (): void => {
+      toast('تم الحفظ', 'success')
+      setModal(false)
+      load(from, to)
+      window.clinic.expenses.due(7).then(setDue).catch(() => {})
+    }
+    if (linkStock) {
+      if (!materialId) {
+        toast('اختر الصنف من المخزون', 'error')
+        return
+      }
+      const qty = Number(units)
+      if (!qty || qty <= 0) {
+        toast('أدخل عدد الوحدات (حبات/عبوات)', 'error')
+        return
+      }
+      window.clinic.expenses
+        .purchase({
+          category: form.category,
+          amount: Math.round(Number(form.amount)),
+          note: form.note,
+          date: form.date,
+          material_id: materialId,
+          quantity: qty
+        })
+        .then(done)
+        .catch((e) => toast(e.message, 'error'))
       return
     }
     window.clinic.expenses
@@ -122,12 +166,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
         recurrence: form.recurrence,
         next_due: form.next_due
       })
-      .then(() => {
-        toast('تم الحفظ', 'success')
-        setModal(false)
-        load(from, to)
-        window.clinic.expenses.due(7).then(setDue).catch(() => {})
-      })
+      .then(done)
       .catch((e) => toast(e.message, 'error'))
   }
 
@@ -189,8 +228,8 @@ export default function Expenses({ settings, role }: { settings: Settings | null
     [load, from, to]
   )
 
-  const exportRows = (): Record<string, string | number>[] =>
-    list.map((e) => ({
+  const exportRows = (rows: Expense[] = list): Record<string, string | number>[] =>
+    rows.map((e) => ({
       category: e.category,
       amount: e.amount,
       amount_usd: e.amount_usd ?? 0,
@@ -268,6 +307,9 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                   recurrence: 'monthly',
                   next_due: ''
                 })
+                setLinkStock(false)
+                setMaterialId(0)
+                setUnits('')
                 setModal(true)
               }}
             >
@@ -283,6 +325,23 @@ export default function Expenses({ settings, role }: { settings: Settings | null
             canEdit={canEdit}
             onSave={onRowSave}
             moneyRate={rate}
+            selectable
+            onBulkDelete={
+              canDelete
+                ? async (rows) => {
+                    for (const e of rows) await window.clinic.expenses.delete(e.id)
+                    toast(`تم حذف ${rows.length} مصروف`, 'success')
+                    load(from, to)
+                  }
+                : undefined
+            }
+            onBulkExport={(rows) => {
+              void exportNow('المصاريف', 'expenses', exportRows(rows))
+                .then((p) => {
+                  if (p) toast('تم التصدير: ' + p, 'success')
+                })
+                .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+            }}
             emptyText="لا توجد مصاريف"
             actions={(e) =>
               canDelete ? (
@@ -320,14 +379,11 @@ export default function Expenses({ settings, role }: { settings: Settings | null
         >
           <div className="form-grid">
             <Field label="التصنيف *">
-              <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                <option value="">اختر التصنيف...</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={form.category}
+                onChange={(v) => setForm({ ...form, category: v })}
+                options={[{ value: '', label: 'اختر التصنيف...' }, ...CATEGORIES.map((c) => ({ value: c, label: c }))]}
+              />
             </Field>
             <Field label="المبلغ (ل.س أو $) *">
                 <CurrencyInput
@@ -341,38 +397,72 @@ export default function Expenses({ settings, role }: { settings: Settings | null
             <Field label="التاريخ">
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </Field>
-            <Field label="مصروف متكرر">
+            <div className="field full" style={{ gridColumn: '1 / -1' }}>
               <label className="inline-check">
-                <input
-                  type="checkbox"
-                  checked={form.is_recurring}
-                  onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
-                />
-                يتكرر تلقائياً
+                <input type="checkbox" checked={linkStock} onChange={(e) => setLinkStock(e.target.checked)} />
+                فاتورة مشتريات مرتبطة بالمخزون (تقسيم السعر على عدد الوحدات)
               </label>
-            </Field>
-            {form.is_recurring && (
+            </div>
+            {linkStock && (
               <>
-                <Field label="الدورية">
-                  <select
-                    value={form.recurrence}
-                    onChange={(e) => setForm({ ...form, recurrence: e.target.value as Recurrence })}
-                  >
-                    {RECURRENCE_OPTIONS.map((r) => (
-                      <option key={r.value} value={r.value}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="أول استحقاق (اتركه فارغاً ليُحسب من التاريخ)">
-                  <input
-                    type="date"
-                    min={form.date}
-                    value={form.next_due}
-                    onChange={(e) => setForm({ ...form, next_due: e.target.value })}
+                <Field label="الصنف في المخزون *">
+                  <SearchSelect
+                    value={materialId}
+                    onChange={(v) => setMaterialId(Number(v))}
+                    options={[
+                      { value: 0, label: 'اختر الصنف...' },
+                      ...materials.map((m) => ({ value: m.id, label: `${m.name}${m.unit ? ` (${m.unit})` : ''}` }))
+                    ]}
                   />
                 </Field>
+                <Field label="عدد الوحدات (حبات/عبوات) *">
+                  <NumberInput value={Number(units) || 0} onChange={(v) => setUnits(String(v))} />
+                </Field>
+                <div className="field full" style={{ gridColumn: '1 / -1' }}>
+                  <div
+                    className="flex between"
+                    style={{ fontWeight: 800, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}
+                  >
+                    <span>كلفة الوحدة (المبلغ ÷ عدد الوحدات):</span>
+                    <span>
+                      {unitCost.toLocaleString('en-US')} ل.س
+                      {rate > 0 && <span className="muted"> ({(unitCost / rate).toFixed(2)} $)</span>}
+                    </span>
+                  </div>
+                </div>
+              </>
+            )}
+            {!linkStock && (
+              <>
+                <Field label="مصروف متكرر">
+                  <label className="inline-check">
+                    <input
+                      type="checkbox"
+                      checked={form.is_recurring}
+                      onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
+                    />
+                    يتكرر تلقائياً
+                  </label>
+                </Field>
+                {form.is_recurring && (
+                  <>
+                    <Field label="الدورية">
+                      <SearchSelect
+                        value={form.recurrence}
+                        onChange={(v) => setForm({ ...form, recurrence: v as Recurrence })}
+                        options={RECURRENCE_OPTIONS.map((r) => ({ value: r.value, label: r.label }))}
+                      />
+                    </Field>
+                    <Field label="أول استحقاق (اتركه فارغاً ليُحسب من التاريخ)">
+                      <input
+                        type="date"
+                        min={form.date}
+                        value={form.next_due}
+                        onChange={(e) => setForm({ ...form, next_due: e.target.value })}
+                      />
+                    </Field>
+                  </>
+                )}
               </>
             )}
             <Field label="اسم الصنف">

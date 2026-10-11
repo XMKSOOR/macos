@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Confirm, Field, Modal, SearchBox, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import DataGrid from '../table'
 import type { Col } from '../table'
-import ExcelBar from '../excel'
+import ExcelBar, { exportNow } from '../excel'
 import type { CatalogItem, Material, Role, Settings } from '../lib'
 import { can, fmt, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
@@ -182,8 +183,8 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
     [load]
   )
 
-  const exportRows = (): Record<string, string | number>[] =>
-    filtered.map((c) => ({
+  const exportRows = (rows: CatalogItem[] = filtered): Record<string, string | number>[] =>
+    rows.map((c) => ({
       name: c.name,
       price: c.price,
       price_usd: c.price_usd ?? 0,
@@ -213,6 +214,23 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
             canEdit={canEdit}
             onSave={onRowSave}
             moneyRate={rate}
+            selectable
+            onBulkDelete={
+              canDelete
+                ? async (rows) => {
+                    for (const c of rows) await window.clinic.catalog.delete(c.id)
+                    toast(`تم حذف ${rows.length} صنف`, 'success')
+                    load()
+                  }
+                : undefined
+            }
+            onBulkExport={(rows) => {
+              void exportNow('كتالوج الأصناف', 'catalog', exportRows(rows))
+                .then((p) => {
+                  if (p) toast('تم التصدير: ' + p, 'success')
+                })
+                .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+            }}
             emptyText="لا توجد أصناف"
             actions={(c) => (
               <>
@@ -272,14 +290,14 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
               const m = materials.find((x) => x.id === l.material_id)
               return (
                 <div className="series-item" key={i}>
-                  <select value={l.material_id} onChange={(e) => setLine(i, { material_id: Number(e.target.value) })}>
-                    <option value={0}>اختر المادة...</option>
-                    {materials.map((mm) => (
-                      <option key={mm.id} value={mm.id}>
-                        {mm.name} (متوفر {mm.quantity})
-                      </option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={l.material_id}
+                    onChange={(v) => setLine(i, { material_id: Number(v) })}
+                    options={[
+                      { value: 0, label: 'اختر المادة...' },
+                      ...materials.map((mm) => ({ value: mm.id, label: `${mm.name} (متوفر ${mm.quantity})` }))
+                    ]}
+                  />
                   <input
                     type="text" dir="ltr" inputMode="decimal"
                     value={l.qty}

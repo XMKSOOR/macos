@@ -366,6 +366,23 @@ async function pushPlans(
   return { pushed, removed, bad }
 }
 
+/** يحذف من السحابة أي مفاتيح إعدادات خاصّة بالمزامنة تسرّبت سابقاً (حالة كل جهاز يجب أن تبقى محلية) */
+async function purgeRemoteMetaSettings(cfg: CloudConfig): Promise<void> {
+  try {
+    const res = await request(cfg, '/settings?key=like.sync_state_*', {
+      method: 'DELETE',
+      headers: { Prefer: 'return=minimal' }
+    })
+    if (!res.ok) return
+    await request(cfg, '/settings?key=eq.sync_transport', {
+      method: 'DELETE',
+      headers: { Prefer: 'return=minimal' }
+    })
+  } catch (e) {
+    console.warn('[SYNC:cloud] تنظيف مفاتيح المزامنة من السحابة فشل (غير مميت)', e instanceof Error ? e.message : e)
+  }
+}
+
 async function resetSequences(cfg: CloudConfig): Promise<void> {
   try {
     const res = await request(cfg, '/rpc/reset_sequences', { method: 'POST', body: '{}' })
@@ -397,6 +414,7 @@ export async function cloudPush(): Promise<string> {
     }
   }
 
+  await purgeRemoteMetaSettings(cfg)
   await resetSequences(cfg)
 
   if (bad.size > 0) {
@@ -447,6 +465,7 @@ export async function cloudSync(): Promise<number> {
     }
   }
 
+  await purgeRemoteMetaSettings(cfg)
   await resetSequences(cfg)
   console.log(
     `[SYNC:cloud] sync انتهى: سحب(${counts.inserted} إدراج، ${counts.updated} تحديث، ${counts.deleted} حذف) / رفع(${pushed} محدث، ${removed} محذوف)`

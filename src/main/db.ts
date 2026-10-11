@@ -1789,6 +1789,63 @@ export function createExpense(e: Omit<Expense, 'id' | 'created_at'>): Expense {
   }
 }
 
+export interface MaterialPurchaseInput {
+  category: string
+  amount: number
+  note: string
+  date: string
+  created_by: string
+  material_id: number
+  quantity: number
+}
+
+/**
+ * يسجّل فاتورة مشتريات مرتبطة بالمخزون: ينشئ مصروفاً بالمبلغ الإجمالي، ثم يقسّم
+ * المبلغ على عدد الوحدات ليحصل على كلفة الوحدة ويحدّثها في الصنف، ويزيد كميته،
+ * ويسجّل حركة مخزون. مثال: كرتونة إبر بـ 1000 حبة → كلفة الحبة = الإجمالي ÷ 1000.
+ */
+export function receiveMaterialInvoice(input: MaterialPurchaseInput): Expense {
+  const rate = getSettings().usd_rate
+  const amountN = numAny(input.amount)
+  const amount = Number.isNaN(amountN) ? 0 : amountN
+  const qtyN = numAny(input.quantity)
+  const qty = Number.isNaN(qtyN) || qtyN <= 0 ? 0 : qtyN
+  const unitCost = qty > 0 ? Math.round(amount / qty) : 0
+  const mat = db.prepare('SELECT name, unit FROM materials WHERE id=?').get(input.material_id) as
+    | { name?: string; unit?: string }
+    | undefined
+  if (!mat) throw new Error('الصنف غير موجود')
+  db.prepare('BEGIN').run()
+  try {
+    const expense = createExpense({
+      category: input.category,
+      amount,
+      note: input.note,
+      date: input.date,
+      created_by: input.created_by
+    })
+    db.prepare('UPDATE materials SET quantity = quantity + ?, cost=?, cost_usd=? WHERE id=?').run(
+      qty,
+      unitCost,
+      rate > 0 ? Math.round((unitCost / rate) * 100) / 100 : 0,
+      input.material_id
+    )
+    db.prepare('INSERT INTO stock_movements (material_id, qty, operation, reference, user_name, note) VALUES (?,?,?,?,?,?)').run(
+      input.material_id,
+      qty,
+      'add',
+      'فاتورة مشتريات',
+      input.created_by,
+      `${input.note || mat.name || 'مشتريات'} — ${qty} ${mat.unit || ''} × ${unitCost} ل.س`
+    )
+    db.prepare('COMMIT').run()
+    return expense
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+}
+
 export function updateExpense(id: number, e: Partial<Omit<Expense, 'id' | 'created_at'>>): void {
   const rate = getSettings().usd_rate
   const sets: string[] = []

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Confirm, Empty, Field, Modal, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import ExcelBar from '../excel'
 import type { PermissionKey, PermissionOverride, Role, User } from '../lib'
 import { PERMISSION_LABELS } from '../lib'
@@ -224,11 +225,15 @@ export default function UsersScreen({ currentUser, onSaved }: { currentUser: Use
               <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
             </Field>
             <Field label="الدور">
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-                <option value="admin">مدير</option>
-                <option value="doctor">طبيب</option>
-                <option value="cashier">صراف</option>
-              </select>
+              <SearchSelect
+                value={form.role}
+                onChange={(v) => setForm({ ...form, role: v as Role })}
+                options={[
+                  { value: 'admin', label: 'مدير' },
+                  { value: 'doctor', label: 'طبيب' },
+                  { value: 'cashier', label: 'صراف' }
+                ]}
+              />
             </Field>
           </div>
 

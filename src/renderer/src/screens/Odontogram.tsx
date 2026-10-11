@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import type { PatientAttachment, ToothCondition, DentalChartEntry, PeriodontalChartEntry } from '../lib'
 import { parseNumber } from '../lib'
 
@@ -314,10 +315,11 @@ export default function Odontogram({
               </label>
               <label>
                 النزيف (0/1)
-                <select value={bleeding} onChange={(e) => setBleeding(Number(e.target.value))}>
-                  <option value={0}>لا</option>
-                  <option value={1}>نعم</option>
-                </select>
+                <SearchSelect
+                  value={bleeding}
+                  onChange={(v) => setBleeding(Number(v))}
+                  options={[{ value: 0, label: 'لا' }, { value: 1, label: 'نعم' }]}
+                />
               </label>
               <label>
                 الحركة (0-3)
@@ -358,20 +360,14 @@ export default function Odontogram({
               <button className="soft small" onClick={captureForTooth}>
                 ＋ إضافة صورة وربطها
               </button>
-              <select
+              <SearchSelect
                 value=""
-                onChange={(e) => {
-                  linkAttachment(Number(e.target.value))
-                  e.target.value = ''
+                placeholder="ربط صورة موجودة..."
+                onChange={(v) => {
+                  if (v) linkAttachment(Number(v))
                 }}
-              >
-                <option value="">ربط صورة موجودة...</option>
-                {unlinked.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.filename}
-                  </option>
-                ))}
-              </select>
+                options={[{ value: '', label: 'ربط صورة موجودة...' }, ...unlinked.map((a) => ({ value: a.id, label: a.filename }))]}
+              />
             </div>
           </div>
         </div>

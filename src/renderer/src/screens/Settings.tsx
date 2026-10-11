@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Field, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import type { PrinterInfo, Settings } from '../lib'
 import { parseNumber } from '../lib'
 
@@ -146,14 +147,11 @@ export default function SettingsScreen({
               <input value={form.receipt_footer} onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })} />
             </Field>
             <Field label="الطابعة الافتراضية (80mm)">
-              <select value={form.printer_name} onChange={(e) => setForm({ ...form, printer_name: e.target.value })}>
-                <option value="">— تلقائي —</option>
-                {printers.map((p) => (
-                  <option key={p.name} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={form.printer_name}
+                onChange={(v) => setForm({ ...form, printer_name: v })}
+                options={[{ value: '', label: '— تلقائي —' }, ...printers.map((p) => ({ value: p.name, label: p.name }))]}
+              />
             </Field>
           </div>
           <div className="mt-16">
@@ -178,11 +176,15 @@ export default function SettingsScreen({
               />
             </Field>
             <Field label="معامل حذف الأصفار من العملة">
-              <select value={form.currency_scale} onChange={(e) => setForm({ ...form, currency_scale: e.target.value })}>
-                <option value="1">بدون تغيير (القيم القديمة)</option>
-                <option value="10">حذف صفر واحد</option>
-                <option value="100">حذف صفرين (العملة السورية الجديدة)</option>
-              </select>
+              <SearchSelect
+                value={form.currency_scale}
+                onChange={(v) => setForm({ ...form, currency_scale: v })}
+                options={[
+                  { value: '1', label: 'بدون تغيير (القيم القديمة)' },
+                  { value: '10', label: 'حذف صفر واحد' },
+                  { value: '100', label: 'حذف صفرين (العملة السورية الجديدة)' }
+                ]}
+              />
             </Field>
           </div>
           <div className="flex mt-16" style={{ gap: 12 }}>

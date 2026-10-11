@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Confirm, Field, Modal, StatusBadge, useToast } from '../ui'
+import { SearchSelect } from '../SearchSelect'
 import DataGrid from '../table'
 import type { Col } from '../table'
-import ExcelBar from '../excel'
+import ExcelBar, { exportNow } from '../excel'
 import type { Appointment, Patient, Role } from '../lib'
 import { can, today } from '../lib'
 
@@ -151,8 +152,8 @@ export default function Appointments({
     [patients, load, dateFilter, statusFilter]
   )
 
-  const exportRows = (): Record<string, string | number>[] =>
-    list.map((a) => ({
+  const exportRows = (rows: Appointment[] = list): Record<string, string | number>[] =>
+    rows.map((a) => ({
       patient_name: a.patient_name ?? '',
       date: a.date,
       time: a.time,
@@ -168,12 +169,16 @@ export default function Appointments({
           <h2>المواعيد</h2>
           <div className="toolbar">
             <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">كل الحالات</option>
-              <option value="scheduled">مجدول</option>
-              <option value="done">منجز</option>
-              <option value="cancelled">ملغي</option>
-            </select>
+            <SearchSelect
+              value={statusFilter}
+              onChange={setStatusFilter}
+              options={[
+                { value: '', label: 'كل الحالات' },
+                { value: 'scheduled', label: 'مجدول' },
+                { value: 'done', label: 'منجز' },
+                { value: 'cancelled', label: 'ملغي' }
+              ]}
+            />
             <ExcelBar schema="appointments" title="المواعيد" buildRows={exportRows} onImportRows={canImport ? onImportRows : undefined} />
             <button onClick={() => { setForm({ patient_id: 0, date: today(), time: '', reason: '', status: 'scheduled', notes: '' }); setModal(true) }}>+ موعد جديد</button>
           </div>
@@ -185,6 +190,23 @@ export default function Appointments({
             rowKey={(a) => a.id}
             canEdit={canEdit}
             onSave={onRowSave}
+            selectable
+            onBulkDelete={
+              canDelete
+                ? async (rows) => {
+                    for (const a of rows) await window.clinic.appointments.delete(a.id)
+                    toast(`تم حذف ${rows.length} موعد`, 'success')
+                    load(dateFilter, statusFilter)
+                  }
+                : undefined
+            }
+            onBulkExport={(rows) => {
+              void exportNow('المواعيد', 'appointments', exportRows(rows))
+                .then((p) => {
+                  if (p) toast('تم التصدير: ' + p, 'success')
+                })
+                .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
+            }}
             emptyText="لا توجد مواعيد"
             actions={(a) => (
               <>
@@ -214,14 +236,14 @@ export default function Appointments({
         >
           <div className="form-grid">
             <Field label="المريض *">
-              <select value={form.patient_id} onChange={(e) => setForm({ ...form, patient_id: Number(e.target.value) })}>
-                <option value={0}>اختر المريض...</option>
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.phone ? `(${p.phone})` : ''}
-                  </option>
-                ))}
-              </select>
+              <SearchSelect
+                value={form.patient_id}
+                onChange={(v) => setForm({ ...form, patient_id: Number(v) })}
+                options={[
+                  { value: 0, label: 'اختر المريض...' },
+                  ...patients.map((p) => ({ value: p.id, label: `${p.name}${p.phone ? ` (${p.phone})` : ''}` }))
+                ]}
+              />
             </Field>
             <Field label="التاريخ *">
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />

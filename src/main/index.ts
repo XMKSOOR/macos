@@ -10,6 +10,12 @@ import { startAutoSync, syncAllOnQuit, syncAllOnStart } from './autoSync'
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
 
 /**
+ * إجبار لغة التطبيق على الإنجليزية (أرقام لاتينية) لكل عناصر النظام،
+ * خصوصاً حقول التاريخ/الوقت الأصلية التي تظهر بالأرقام العربية عندما تكون لغة النظام عربية.
+ */
+app.commandLine.appendSwitch('lang', 'en-US')
+
+/**
  * تحميل مفاتيح Supabase المضمّنة مع النسخة المثبّتة (resources/app.env).
  * لا يستبدل أي متغيّر بيئة موجود مسبقاً.
  */

@@ -9,6 +9,7 @@ import {
   createExpense,
   createInvoice,
   createMaterial,
+  receiveMaterialInvoice,
   createPatient,
   createUser,
   dashboardStats,
@@ -134,7 +135,7 @@ function requireAuth(perm?: PermissionKey): User {
 }
 
 const MUTATION_SUFFIX =
-  /:(create|update|delete|save|pay|adjust|import|importRows|setTooth|saveTooth|deleteTooth|complete|addItem|updateItem|deleteItem|runDue|changePassword|add)$/
+  /:(create|update|delete|save|pay|adjust|import|importRows|purchase|setTooth|saveTooth|deleteTooth|complete|addItem|updateItem|deleteItem|runDue|changePassword|add)$/
 const MUTATION_EXACT = new Set([
   'settings:save',
   'currency:convert',
@@ -639,6 +640,18 @@ export function registerIpc(ipc: IpcMain): void {
     requireAuth()
     const data = args as { category: string; amount: number; note: string; date: string }
     return createExpense({ ...data, created_by: currentUser!.full_name || currentUser!.username })
+  })
+  handle('expenses:purchase', (args) => {
+    requireAuth('edit')
+    const data = args as {
+      category: string
+      amount: number
+      note: string
+      date: string
+      material_id: number
+      quantity: number
+    }
+    return receiveMaterialInvoice({ ...data, created_by: currentUser!.full_name || currentUser!.username })
   })
   handle('expenses:update', (args) => {
     requireAuth('edit')

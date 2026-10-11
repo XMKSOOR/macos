@@ -124,6 +124,7 @@ const api = {
   expenses: {
     list: (filter?: object): Promise<Expense[]> => invoke('expenses:list', filter ?? {}),
     create: (e: object): Promise<Expense> => invoke('expenses:create', e),
+    purchase: (e: object): Promise<Expense> => invoke('expenses:purchase', e),
     update: (id: number, data: object): Promise<boolean> => invoke('expenses:update', { id, data }),
     delete: (id: number): Promise<boolean> => invoke('expenses:delete', { id }),
     due: (withinDays?: number): Promise<DueRecurringExpense[]> => invoke('expenses:due', { withinDays }),
