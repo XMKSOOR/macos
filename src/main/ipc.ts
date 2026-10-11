@@ -137,7 +137,7 @@ const MUTATION_SUFFIX =
   /:(create|update|delete|save|pay|adjust|import|importRows|setTooth|saveTooth|deleteTooth|complete|addItem|updateItem|deleteItem|runDue|changePassword|add)$/
 const MUTATION_EXACT = new Set([
   'settings:save',
-  'settings:convertCurrency',
+  'currency:convert',
   'db:restore',
   'db:changeLocation',
   'db:useLocal',

@@ -38,6 +38,10 @@ import com.clinic.companion.data.ClinicRepo
 import com.clinic.companion.data.DashboardStats
 import com.clinic.companion.data.DayStat
 import com.clinic.companion.data.Invoice
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.delay
 
 private val ColorIncome = Color(0xFF0E7C66)
 private val ColorExpense = Color(0xFFDC2626)
@@ -52,16 +56,34 @@ fun DashboardScreen(repo: ClinicRepo) {
   var stats by remember { mutableStateOf<DashboardStats?>(null) }
   var rate by remember { mutableStateOf(130.0) }
   var refreshKey by remember { mutableIntStateOf(0) }
+  var lastSync by remember { mutableStateOf("") }
 
   LaunchedEffect(periodIdx, refreshKey) {
     loading = true; error = null
     try {
       stats = repo.dashboardStats(periods[periodIdx].first)
       rate = repo.usdRate().takeIf { it > 0 } ?: 130.0
+      lastSync = stamp()
     } catch (e: Exception) {
       error = e.message
     } finally {
       loading = false
+    }
+  }
+
+  // مزامنة حية: تُجدد تلقائياً كل 30 ثانية لتعكس أحدث التعديلات المرفوعة من ويندوز/ماك
+  LaunchedEffect(Unit) {
+    while (true) {
+      delay(30_000)
+      try {
+        val s = repo.dashboardStats(periods[periodIdx].first)
+        stats = s
+        rate = repo.usdRate().takeIf { it > 0 } ?: rate
+        lastSync = stamp()
+        error = null
+      } catch (_: Exception) {
+        // أبقِ آخر بيانات معروضة عند فشل الشبكة
+      }
     }
   }
 
@@ -79,6 +101,12 @@ fun DashboardScreen(repo: ClinicRepo) {
         Icon(Icons.Filled.Refresh, contentDescription = "تحديث")
       }
     }
+    Text(
+      if (lastSync.isBlank()) "يتحدث تلقائياً من السحابة كل 30 ثانية"
+      else "آخر تحديث: $lastSync — يتحدث تلقائياً كل 30 ثانية",
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
+      style = MaterialTheme.typography.bodySmall
+    )
 
     Row(
       Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -257,6 +285,8 @@ private fun StatusLabel(status: String) {
 
 private fun usdLabel(lbp: Long, rate: Double): String =
   if (rate > 0) "$%,.2f".format(lbp / rate) else "—"
+
+private fun stamp(): String = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())
 
 @Composable
 private fun CardPanel(content: @Composable () -> Unit) {
