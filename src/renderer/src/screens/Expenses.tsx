@@ -73,9 +73,11 @@ export default function Expenses({ settings, role }: { settings: Settings | null
   const [deleting, setDeleting] = useState<Expense | null>(null)
   const [due, setDue] = useState<DueRecurringExpense[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
-  const [linkStock, setLinkStock] = useState(false)
   const [materialId, setMaterialId] = useState(0)
   const [units, setUnits] = useState('')
+  const [addingItem, setAddingItem] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newUnit, setNewUnit] = useState('')
   const toast = useToast()
   const rate = settings?.usd_rate ?? 130
   const unitsNum = Number(units) || 0
@@ -133,11 +135,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       load(from, to)
       window.clinic.expenses.due(7).then(setDue).catch(() => {})
     }
-    if (linkStock) {
-      if (!materialId) {
-        toast('اختر الصنف من المخزون', 'error')
-        return
-      }
+    if (materialId !== 0) {
       const qty = Number(units)
       if (!qty || qty <= 0) {
         toast('أدخل عدد الوحدات (حبات/عبوات)', 'error')
@@ -167,6 +165,25 @@ export default function Expenses({ settings, role }: { settings: Settings | null
         next_due: form.next_due
       })
       .then(done)
+      .catch((e) => toast(e.message, 'error'))
+  }
+
+  const createItem = (): void => {
+    const name = newName.trim()
+    if (!name) {
+      toast('أدخل اسم الصنف الجديد', 'error')
+      return
+    }
+    window.clinic.inventory
+      .create({ name, category: '', unit: newUnit.trim(), quantity: 0, min_qty: 0, cost: 0, supplier: '', notes: '' })
+      .then((m) => {
+        setMaterials((p) => [...p, m].sort((a, b) => a.name.localeCompare(b.name)))
+        setMaterialId(m.id)
+        setAddingItem(false)
+        setNewName('')
+        setNewUnit('')
+        toast('تمت إضافة الصنف للمخزون', 'success')
+      })
       .catch((e) => toast(e.message, 'error'))
   }
 
@@ -307,9 +324,11 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                   recurrence: 'monthly',
                   next_due: ''
                 })
-                setLinkStock(false)
                 setMaterialId(0)
                 setUnits('')
+                setAddingItem(false)
+                setNewName('')
+                setNewUnit('')
                 setModal(true)
               }}
             >
@@ -397,25 +416,57 @@ export default function Expenses({ settings, role }: { settings: Settings | null
             <Field label="التاريخ">
               <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </Field>
-            <div className="field full" style={{ gridColumn: '1 / -1' }}>
-              <label className="inline-check">
-                <input type="checkbox" checked={linkStock} onChange={(e) => setLinkStock(e.target.checked)} />
-                فاتورة مشتريات مرتبطة بالمخزون (تقسيم السعر على عدد الوحدات)
-              </label>
-            </div>
-            {linkStock && (
-              <>
-                <Field label="الصنف في المخزون *">
+            <Field label="الصنف في المخزون (اختياري)">
+              <div className="flex" style={{ gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
                   <SearchSelect
                     value={materialId}
                     onChange={(v) => setMaterialId(Number(v))}
                     options={[
-                      { value: 0, label: 'اختر الصنف...' },
+                      { value: 0, label: '— لا شيء (مصروف عادي) —' },
                       ...materials.map((m) => ({ value: m.id, label: `${m.name}${m.unit ? ` (${m.unit})` : ''}` }))
                     ]}
                   />
-                </Field>
-                <Field label="عدد الوحدات (حبات/عبوات) *">
+                </div>
+                <button type="button" className="soft small" onClick={() => setAddingItem(true)} title="إضافة صنف جديد للمخزون">
+                  ＋ صنف جديد
+                </button>
+              </div>
+            </Field>
+            {addingItem && (
+              <div
+                className="field full"
+                style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', background: 'var(--bg)', border: '1px dashed var(--border)', borderRadius: 8, padding: 10 }}
+              >
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <Field label="اسم الصنف الجديد *">
+                    <input value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus />
+                  </Field>
+                </div>
+                <div style={{ width: 130 }}>
+                  <Field label="الوحدة">
+                    <input value={newUnit} onChange={(e) => setNewUnit(e.target.value)} placeholder="حبة / علبة" />
+                  </Field>
+                </div>
+                <button type="button" className="soft small" onClick={createItem}>
+                  إضافة للقائمة
+                </button>
+                <button
+                  type="button"
+                  className="ghost small"
+                  onClick={() => {
+                    setAddingItem(false)
+                    setNewName('')
+                    setNewUnit('')
+                  }}
+                >
+                  إلغاء
+                </button>
+              </div>
+            )}
+            {materialId !== 0 && (
+              <>
+                <Field label="عدد الوحدات المشتراة (حبات/عبوات) *">
                   <NumberInput value={Number(units) || 0} onChange={(v) => setUnits(String(v))} />
                 </Field>
                 <div className="field full" style={{ gridColumn: '1 / -1' }}>
@@ -423,7 +474,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                     className="flex between"
                     style={{ fontWeight: 800, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px' }}
                   >
-                    <span>كلفة الوحدة (المبلغ ÷ عدد الوحدات):</span>
+                    <span>كلفة الوحدة (المبلغ ÷ عدد الوحدات) — تُضاف الكمية للصنف:</span>
                     <span>
                       {unitCost.toLocaleString('en-US')} ل.س
                       {rate > 0 && <span className="muted"> ({(unitCost / rate).toFixed(2)} $)</span>}
@@ -432,7 +483,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 </div>
               </>
             )}
-            {!linkStock && (
+            {materialId === 0 && (
               <>
                 <Field label="مصروف متكرر">
                   <label className="inline-check">

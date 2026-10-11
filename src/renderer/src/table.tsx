@@ -103,13 +103,6 @@ export default function DataGrid<T>({
   const pendingRef = useRef<Set<string>>(new Set())
   const timerRef = useRef<number | null>(null)
 
-  useEffect(
-    () => () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current)
-    },
-    []
-  )
-
   const keyOf = (r: T): string => String(rowKey(r))
   const selectedRows = rows.filter((r) => selected.has(keyOf(r)))
   const allSelected = rows.length > 0 && selectedRows.length === rows.length
@@ -196,6 +189,7 @@ export default function DataGrid<T>({
     }
     try {
       await onSave(ek, patch)
+      pendingRef.current.clear()
       if (closeNow) setEditKey(null)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -205,6 +199,19 @@ export default function DataGrid<T>({
   }
   const commitRef = useRef(commit)
   commitRef.current = commit
+
+  // عند مغادرة الشاشة (أو إعادة تركيبها) نحفظ أي تعديل معلّق لم يُحفظ بعد
+  // (وإلا يضيع ما كُتب خلال مدة الانتظار 700ms قبل الحفظ التلقائي).
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+      if (pendingRef.current.size > 0) void commitRef.current(true)
+    },
+    []
+  )
 
   /** جدولة الحفظ التلقائي لحقل تغيّر */
   const markChanged = (key: string): void => {

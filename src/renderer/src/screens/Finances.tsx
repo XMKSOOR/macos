@@ -110,9 +110,12 @@ export default function Finances({ settings }: { settings: Settings | null }): R
   }, [persistPlan])
 
   useEffect(() => {
-    const timer = saveTimerRef.current
     return () => {
-      if (timer !== null) clearTimeout(timer)
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current)
+        saveTimerRef.current = null
+        persistPlan(latestPlanRef.current)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -123,17 +126,27 @@ export default function Finances({ settings }: { settings: Settings | null }): R
   }
 
   useEffect(() => {
-    const stored = settings?.feasibility_plan
-    if (stored) {
+    let cancelled = false
+    const applyStored = (stored?: string): void => {
+      if (cancelled || !stored) return
       try {
         const o = JSON.parse(stored) as Partial<PlanState>
         const p = defaultPlan()
         const nm = o.numMonths && o.numMonths > 0 ? Math.min(36, Math.max(1, o.numMonths)) : 6
-        setPlan({ startDate: o.startDate || p.startDate, numMonths: nm, capital: o.capital ?? p.capital })
-        return
+        const next: PlanState = { startDate: o.startDate || p.startDate, numMonths: nm, capital: o.capital ?? p.capital }
+        latestPlanRef.current = next
+        setPlan(next)
       } catch {
-        /* fallthrough to defaults */
+        /* تجاهل خطة غير صالحة */
       }
+    }
+    // نقرأ الخطة من القاعدة مباشرةً عند كل دخول للشاشة (props قد تكون قديمة بعد الحفظ)
+    window.clinic.settings
+      .get()
+      .then((s) => applyStored(s?.feasibility_plan))
+      .catch(() => applyStored(settings?.feasibility_plan))
+    return () => {
+      cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
