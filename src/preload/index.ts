@@ -206,8 +206,9 @@ records: {
     driveDownload: (): Promise<string> => invoke('sync:driveDownload'),
     driveStatus: (): Promise<{ connected: boolean; config: boolean }> => invoke('sync:driveStatus'),
     driveClear: (): Promise<boolean> => invoke('sync:driveClear'),
-    onRefresh: (cb: () => void): (() => void) => {
-      const listener = (): void => cb()
+    onRefresh: (cb: (p: { at: string; changed: number }) => void): (() => void) => {
+      const listener = (_e: unknown, p?: { at?: string; changed?: number }): void =>
+        cb({ at: p?.at ?? '', changed: p?.changed ?? 0 })
       ipcRenderer.on('sync:refreshed', listener)
       return () => ipcRenderer.removeListener('sync:refreshed', listener)
     }

@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { backupDatabase, getDb, getDbPath, getSettings } from './db'
 import { fingerprintDb, readSyncState, writeSyncState, SYNC_TABLES } from './syncCore'
 import { driveRemote, driveUpload, driveDownload } from './sync'
-import { mysqlConfig, mysqlPush, mysqlPull, mysqlRemoteFp } from './mysql'
+import { mysqlConfig, mysqlPush, mysqlPull, mysqlRemoteFp, mysqlPullChanged, resetMysqlPullChanged } from './mysql'
 import { supabaseConfig, supabasePush, supabasePull, supabaseRemoteFp } from './supabase'
-import { cloudConfig, cloudPush, cloudPull, cloudRemoteFp } from './cloud'
+import { cloudConfig, cloudPush, cloudPull, cloudRemoteFp, cloudPullChanged, resetCloudPullChanged } from './cloud'
 
 const DEBOUNCE_MS = 3000
 const PERIOD_MS = 60 * 1000
@@ -34,6 +34,8 @@ interface SyncUnit {
   fetchRemote: () => Promise<RemoteFp | null>
   push: () => Promise<void>
   pull: () => Promise<void>
+  /** عدد الصفوف التي غيّرها آخر سحب فعلياً (يُستعمل لتحديد هل نُعيد تحميل الواجهة) */
+  pullChanged?: () => number
 }
 
 function logUnit(u: SyncUnit, msg: string): void {
@@ -82,7 +84,8 @@ function units(): SyncUnit[] {
       },
       pull: async () => {
         await driveDownload()
-      }
+      },
+      pullChanged: () => 1
     },
     {
       id: 'mysql',
@@ -97,22 +100,25 @@ function units(): SyncUnit[] {
       },
       pull: async () => {
         await mysqlPull()
-      }
+      },
+      pullChanged: () => mysqlPullChanged()
     },
     {
       id: 'supabase',
-      autoOn: () => (s.supabase_auto ?? '0') === '1' && !!supabaseConfig(),
-      whyOff: () =>
-        (s.supabase_auto ?? '0') !== '1'
-          ? 'supabase_auto != 1'
-          : 'لا يوجد رابط/مفتاح Supabase (تحقق من .env أو resources/app.env أو الإعدادات)',
+      autoOn: () => (s.supabase_auto ?? '0') === '1' && !!supabaseConfig() && !cloudConfig(),
+      whyOff: () => {
+        if ((s.supabase_auto ?? '0') !== '1') return 'supabase_auto != 1'
+        if (!!cloudConfig()) return 'مزامنة Postgres مفعّلة — نسخة الملفات (bucket) لا تُفعّل معها لتجنّب استبدال ملف القاعدة'
+        return 'لا يوجد رابط/مفتاح Supabase (تحقق من .env أو resources/app.env أو الإعدادات)'
+      },
       fetchRemote: supabaseRemoteFp,
       push: async () => {
         await supabasePush()
       },
       pull: async () => {
         await supabasePull()
-      }
+      },
+      pullChanged: () => 1
     },
     {
       id: 'cloud',
@@ -127,7 +133,8 @@ function units(): SyncUnit[] {
       },
       pull: async () => {
         await cloudPull()
-      }
+      },
+      pullChanged: () => cloudPullChanged()
     }
   ]
 }
@@ -248,7 +255,7 @@ async function runUnit(u: SyncUnit): Promise<'push' | 'pull' | 'none' | 'error'>
   return 'pull'
 }
 
-function notifyRendererRefreshed(): void {
+function notifyRendererRefreshed(changed: number): void {
   if (notifyTimer) return
   // لا نقاطع المستخدم أثناء الكتابة: ننتظر حتى يهدأ التفاعل قبل تحديث الواجهة
   const wait = Math.max(0, lastMutationAt + 5000 - Date.now())
@@ -256,7 +263,7 @@ function notifyRendererRefreshed(): void {
     notifyTimer = null
     for (const w of BrowserWindow.getAllWindows()) {
       try {
-        w.webContents.send('sync:refreshed', { at: new Date().toISOString() })
+        w.webContents.send('sync:refreshed', { at: new Date().toISOString(), changed })
       } catch {
         /* ignore */
       }
@@ -271,7 +278,9 @@ export async function syncAll(): Promise<void> {
   const us = units()
   const enabled = us.filter((u) => u.autoOn()).map((u) => u.id)
   console.log(`[SYNC] بدء دورة مزامنة — النواقل المفعّلة: ${enabled.length ? enabled.join(', ') : '(لا شيء)'}`)
-  let didPull = false
+  resetCloudPullChanged()
+  resetMysqlPullChanged()
+  let pullChanged = 0
   for (const u of us) {
     if (!u.autoOn()) {
       console.log(`[SYNC:${u.id}] معطّل: ${u.whyOff ? u.whyOff() : 'غير مفعّل'}`)
@@ -279,14 +288,15 @@ export async function syncAll(): Promise<void> {
     }
     try {
       const r = await runUnit(u)
-      if (r === 'pull') didPull = true
+      if (r === 'pull') pullChanged += u.pullChanged ? u.pullChanged() : 1
     } catch (e) {
       // runUnit يمسك الأخطاء داخلياً؛ هذه شبكة أمان إضافية حتى لا يتوقف المحرك
       errUnit(u, 'runUnit', e)
     }
   }
   console.log(`[SYNC] انتهت دورة المزامنة في ${Math.round(Date.now() - started)}ms`)
-  if (didPull) notifyRendererRefreshed()
+  // إعادة تحميل الواجهة فقط إذا غيّر السحب بيانات فعلية — لا أقفّل التطبيق بلا سبب
+  if (pullChanged > 0) notifyRendererRefreshed(pullChanged)
 }
 
 async function runAutoSync(): Promise<void> {

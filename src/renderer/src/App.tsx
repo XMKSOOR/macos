@@ -87,7 +87,9 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (!user) return
     let timer: number | undefined
-    const off = window.clinic.sync.onRefresh(() => {
+    const off = window.clinic.sync.onRefresh((p) => {
+      // لا نعيد تحميل الواجهة إلا عند تغيّر بيانات فعلي (سحب صفوف معدلة)
+      if (!p.changed) return
       if (timer) return
       timer = window.setTimeout(() => window.location.reload(), 300)
     })

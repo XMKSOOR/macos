@@ -273,6 +273,33 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+--  5) دالة البصمة الخفيفة: تُرجع عدد الصفوف ومجموع بصمات hash لكل صف في جدول.
+--     يتحقق بها تطبيق السطح المكتب من أي تغيير على السحابة دون تحميل الجداول
+--     كاملة (مزامنة تفرقية سريعة). اختيارية: بدونها يعمل بالجلب الكامل لكن أبطأ.
+-- ---------------------------------------------------------------------
+create or replace function public.sync_table_digest(p_table text)
+returns table(cnt bigint, h bigint)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_table !~ '^[a-z_][a-z0-9_]*$' or not (
+    p_table in ('users','patients','appointments','catalog','materials','catalog_materials',
+                'invoices','invoice_items','invoice_materials','stock_movements','expenses',
+                'settings','patient_medications','medicines')
+  ) then
+    raise exception 'invalid table name';
+  end if;
+  return query
+    execute format(
+      'select count(*)::bigint as cnt, coalesce(sum(hashtext(row_to_json(t)::text)::bigint), 0)::bigint as h from public.%I t',
+      p_table
+    );
+end;
+$$;
+
+-- ---------------------------------------------------------------------
 --  تم. الخطوة التالية: أنشئ مستخدماً من  Authentication > Users > Add user
 --  (البريد + كلمة المرور) ليستخدمه تطبيق الأندرويد لتسجيل الدخول.
 -- ---------------------------------------------------------------------

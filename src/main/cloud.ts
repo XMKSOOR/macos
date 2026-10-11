@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto'
 import { getDb } from './db'
 import { supabaseConfig } from './supabase'
 import { fingerprintTables } from './syncCore'
+import { planPush, saveBaseline, mergeIntoLocal, pkColumn } from './syncDelta'
 
 // الجداول المركّبة كاملة (نسخة معكوسة) على Supabase Postgres
 const SYNC_TABLES: string[] = [
@@ -55,6 +57,10 @@ const INSERT_ORDER: string[] = [
   'expenses',
   'settings'
 ]
+
+const TRANSPORT = 'cloud'
+
+let lastPullChanged = 0
 
 interface CloudConfig {
   rest: string
@@ -129,6 +135,14 @@ export async function cloudTest(): Promise<string> {
     : 'تم الاتصال، لكن الدالة reset_sequences غير موجودة (نفّذ ملف schema.sql في Supabase)'
 }
 
+export function cloudPullChanged(): number {
+  return lastPullChanged
+}
+
+export function resetCloudPullChanged(): void {
+  lastPullChanged = 0
+}
+
 function readLocalTable(t: string): Record<string, unknown>[] {
   const db = getDb()
   return db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
@@ -143,9 +157,48 @@ function countLocal(t: string): number {
   }
 }
 
+/** بصمة خفيفة عبر دالة sync_table_digest في Postgres — إن لم توجد نعود للجلب الكامل */
+async function cheapRemoteDigest(
+  cfg: CloudConfig
+): Promise<{ t: string; cnt: number; h: number }[] | null> {
+  try {
+    const out: { t: string; cnt: number; h: number }[] = []
+    for (const t of SYNC_TABLES) {
+      const res = await request(cfg, `/rpc/sync_table_digest?p_table=${t}`)
+      if (!res.ok) return null
+      const data = (await res.json()) as { cnt?: number | string; h?: number | string }[]
+      const row = Array.isArray(data) ? data[0] : undefined
+      out.push({ t, cnt: Number(row?.cnt ?? 0), h: Number(row?.h ?? 0) })
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 export async function cloudRemoteFp(): Promise<{ hash: string; rows: number } | null> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
+
+  const digests = await cheapRemoteDigest(cfg)
+  if (digests) {
+    const total = digests.reduce((s, d) => s + d.cnt, 0)
+    if (total === 0) return null
+    const h = createHash('sha256')
+    for (const t of SYNC_TABLES) {
+      const d = digests.find((x) => x.t === t)
+      h.update(JSON.stringify(t))
+      h.update(' ')
+      h.update(String(d?.cnt ?? 0))
+      h.update(' ')
+      h.update(String(d?.h ?? 0))
+    }
+    return { hash: h.digest('hex'), rows: total }
+  }
+  console.warn(
+    '[SYNC:cloud] الدالة sync_table_digest غير موجودة على Supabase — استخدم طريقة الجلب الكامل (أبطأ). نفّذ SQL المقترحة في محرر SQL لتسريع العملية.'
+  )
+
   const rowsByTable: Record<string, unknown[]> = {}
   let total = 0
   let failedTables = 0
@@ -169,38 +222,104 @@ export async function cloudRemoteFp(): Promise<{ hash: string; rows: number } | 
   return { hash: fp.hash, rows: fp.rows }
 }
 
+function inQuery(col: string, ids: (string | number)[]): string {
+  const parts = ids.map((i) => {
+    const s = String(i)
+    if (/^\d+$/.test(s)) return s
+    return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+  })
+  return `${col}=in.(${parts.join(',')})`
+}
+
+async function deleteIds(cfg: CloudConfig, t: string, ids: (string | number)[]): Promise<number> {
+  const col = pkColumn(t)
+  let removed = 0
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500)
+    const res = await request(cfg, `/${t}?${inQuery(col, chunk)}`, {
+      method: 'DELETE',
+      headers: { Prefer: 'return=minimal' }
+    })
+    if (!res.ok) await fail(res)
+    removed += chunk.length
+  }
+  return removed
+}
+
 export async function cloudPush(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
   console.log(`[SYNC:cloud] push يبدأ (المفتاح: ${maskedKey()}, الرابط: ${cfg.rest})`)
 
-  // دمج النسخة المحلية في السحابة دون حذف صفوف أُنشئت من الجوال (upsert بالمعرّف)
-  let count = 0
-  const failed: string[] = []
+  // الرفع تفرّقي: نرسل فقط الصفوف الجديدة/المعدلة، ونحذف الصفوف المحذوفة محلياً
+  const bad = new Set<string>()
+  let pushed = 0
+  let removed = 0
+
+  // 1) رفع/تحديث الصفوف المتغيرة (الآباء قبل الأبناء)
   for (const t of INSERT_ORDER) {
+    if (bad.has(t)) continue
     let rows: Record<string, unknown>[]
     try {
       rows = readLocalTable(t)
     } catch (e) {
       diagnoseCloud(`push/قراءة ${t}`, e)
-      failed.push(t)
+      bad.add(t)
       continue
     }
-    if (rows.length === 0) continue
+    let plan: ReturnType<typeof planPush>
+    try {
+      plan = planPush(TRANSPORT, t, rows)
+    } catch (e) {
+      diagnoseCloud(`push/تخطيط ${t}`, e)
+      bad.add(t)
+      continue
+    }
+    if (plan.upsert.length === 0) continue
     try {
       const res = await request(cfg, `/${t}`, {
         method: 'POST',
         headers: { Prefer: 'return=minimal,resolution=merge-duplicates' },
-        body: JSON.stringify(rows)
+        body: JSON.stringify(plan.upsert)
       })
-      if (!res.ok) {
-        await fail(res)
-      }
-      count += rows.length
-      console.log(`[SYNC:cloud] push ${t}: ${rows.length} صفاً ✓`)
+      if (!res.ok) await fail(res)
+      pushed += plan.upsert.length
+      console.log(`[SYNC:cloud] push ${t}: رفع ${plan.upsert.length} صفاً متغيّراً ✓`)
     } catch (e) {
       diagnoseCloud(`push/${t}`, e)
-      failed.push(t)
+      bad.add(t)
+    }
+  }
+
+  // 2) حذف الصفوف المحذوفة محلياً (الأبناء قبل الآباء)
+  for (const t of DELETE_ORDER) {
+    if (bad.has(t)) continue
+    let deletes: (string | number)[] = []
+    try {
+      deletes = planPush(TRANSPORT, t, readLocalTable(t)).deletes
+    } catch (e) {
+      diagnoseCloud(`push/تخطيط حذف ${t}`, e)
+      bad.add(t)
+      continue
+    }
+    if (deletes.length === 0) continue
+    try {
+      const n = await deleteIds(cfg, t, deletes)
+      removed += n
+      console.log(`[SYNC:cloud] push ${t}: حذف ${n} صفاً من البعيد (حُذفت محلياً) ✓`)
+    } catch (e) {
+      diagnoseCloud(`push/حذف ${t}`, e)
+      bad.add(t)
+    }
+  }
+
+  // 3) تحديث baseline للجداول الناجحة فقط (أي فشل يُعاد محاولته الدورة القادمة)
+  for (const t of INSERT_ORDER) {
+    if (bad.has(t)) continue
+    try {
+      saveBaseline(TRANSPORT, t, readLocalTable(t))
+    } catch (e) {
+      console.warn(`[SYNC:cloud] push: تعذّر حفظ baseline ${t}`, e instanceof Error ? e.message : e)
     }
   }
 
@@ -217,13 +336,15 @@ export async function cloudPush(): Promise<string> {
     console.warn('[SYNC:cloud] reset_sequences فشل (غير مميت)', e instanceof Error ? e.message : e)
   }
 
-  if (failed.length > 0) {
-    const msg = `فشلت الجداول التالية: ${failed.join(', ')} — راجع السجل لتشخيص السبب`
+  if (bad.size > 0) {
+    const msg = `فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`
     console.error(`[SYNC:cloud] push: ${msg}`)
     throw new Error(msg)
   }
-  console.log(`[SYNC:cloud] push انتهى: ${count} صفاً في ${INSERT_ORDER.length} جداول`)
-  return `تم رفع نسخة كاملة إلى Supabase Postgres (${count} صفاً في ${INSERT_ORDER.length} جداول)`
+  console.log(
+    `[SYNC:cloud] push انتهى: ${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً في ${INSERT_ORDER.length} جداول`
+  )
+  return `تم رفع التعديلات إلى Supabase Postgres (${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً)`
 }
 
 async function fetchTable(cfg: CloudConfig, t: string): Promise<Record<string, unknown>[]> {
@@ -239,7 +360,7 @@ export async function cloudPull(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
 
-  // 1) نجلب كل الجداول أولاً؛ من فشل جلبُه نتجاوزه (لا نحذف محلياً ما لم نستطع قراءته)
+  // 1) نجلب الجداول؛ من فشل جلبُه نتجاوزه (لا نلمس المحلي لما لم نستطع قراءته)
   const data: Record<string, Record<string, unknown>[]> = {}
   const failed: string[] = []
   let total = 0
@@ -260,59 +381,16 @@ export async function cloudPull(): Promise<string> {
     throw new Error('لا توجد بيانات على Supabase بعد — ارفع نسخة أولاً')
   }
   if (total === 0) {
-    console.log('[SYNC:cloud] pull: جميع الجداول فارغة على السحابة — سأفرّغ النسخة المحلية')
+    console.log('[SYNC:cloud] pull: جميع الجداول فارغة على السحابة — قسم فقط من الصفوف المتزامنة سيُحذف')
   }
 
-  const db = getDb()
-  db.exec('BEGIN')
-  let inserted = 0
-  const badInsert: string[] = []
-  try {
-    for (const t of DELETE_ORDER) {
-      if (!SYNC_TABLES.includes(t) || failed.includes(t)) continue
-      try {
-        db.prepare(`DELETE FROM \`${t}\``).run()
-      } catch (e) {
-        console.warn(`[SYNC:cloud] pull: تعذّر حذف ${t} محلياً — سأتخطاه`, e instanceof Error ? e.message : e)
-      }
-    }
-    for (const t of INSERT_ORDER) {
-      if (!SYNC_TABLES.includes(t) || failed.includes(t)) continue
-      const recs = data[t]
-      if (!recs || recs.length === 0) continue
-      try {
-        const cols = Object.keys(recs[0])
-        const stmt = db.prepare(
-          `INSERT INTO \`${t}\` (\`${cols.join('`,`')}\`) VALUES (${cols.map(() => '?').join(',')})`
-        )
-        for (const r of recs) {
-          stmt.run(...cols.map((c) => normalizeValue(r[c])))
-        }
-        inserted += recs.length
-      } catch (e) {
-        diagnoseCloud(`pull/إدراج ${t}`, e)
-        badInsert.push(t)
-      }
-    }
-    db.exec('COMMIT')
-  } catch (e) {
-    db.exec('ROLLBACK')
-    throw e
-  }
-  if (badInsert.length > 0) {
-    const msg = `تعذّر إدراج الجداول المحلية: ${badInsert.join(', ')} — طابق الأعمدة مع schema.sql`
-    console.error(`[SYNC:cloud] pull: ${msg}`)
-    throw new Error(msg)
-  }
-  console.log(`[SYNC:cloud] pull انتهى: ${inserted} صفاً في ${Object.keys(data).length} جداول`)
-  return `تم سحب نسخة كاملة من Supabase Postgres واستبدال قاعدة البيانات المحلية (${total} صف)`
-}
-
-function normalizeValue(v: unknown): string | number | null {
-  if (v === null || v === undefined) return null
-  if (typeof v === 'boolean') return v ? 1 : 0
-  if (typeof v === 'object') return JSON.stringify(v)
-  return v as string | number
+  // 2) دمج في المكان داخل صفقة: لا مسح كامل، لا استبدال ملف، لا تعطيل للواجهة
+  const counts = mergeIntoLocal(TRANSPORT, data, DELETE_ORDER, INSERT_ORDER, failed)
+  lastPullChanged = counts.inserted + counts.updated + counts.deleted
+  console.log(
+    `[SYNC:cloud] pull انتهى: ${counts.inserted} إدراج، ${counts.updated} تحديث، ${counts.deleted} حذف`
+  )
+  return `تم سحب التغييرات من Supabase Postgres (${counts.inserted} جديد، ${counts.updated} معدّل، ${counts.deleted} محذوف)`
 }
 
 export async function cloudPushOnQuit(): Promise<void> {

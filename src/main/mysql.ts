@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise'
 import { getDb, getSettings } from './db'
 import { fingerprintTables } from './syncCore'
+import { planPush, saveBaseline, mergeIntoLocal, pkColumn } from './syncDelta'
 
 // الجداول المركّبة كاملة (نسخة معكوسة) على MySQL
 const SYNC_TABLES: string[] = [
@@ -54,6 +55,10 @@ const INSERT_ORDER: string[] = [
   'expenses',
   'settings'
 ]
+
+const TRANSPORT = 'mysql'
+
+let lastPullChanged = 0
 
 export interface MysqlConfig {
   host: string
@@ -136,12 +141,17 @@ async function ensureSchema(c: mysql.Connection): Promise<void> {
   }
 }
 
-function readLocalTable(t: string): { cols: string[]; rows: (string | number)[] }[] | null {
+function readLocalRows(t: string): Record<string, unknown>[] {
   const db = getDb()
-  const recs = db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, string | number>[]
-  if (recs.length === 0) return null
-  const cols = Object.keys(recs[0])
-  return recs.map((r) => ({ cols, rows: cols.map((c) => r[c]) }))
+  return db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
+}
+
+export function mysqlPullChanged(): number {
+  return lastPullChanged
+}
+
+export function resetMysqlPullChanged(): void {
+  lastPullChanged = 0
 }
 
 /** بصمة النسخة البعيدة على MySQL (null إذا لم توجد بيانات بعد) */
@@ -180,22 +190,73 @@ export async function mysqlPush(): Promise<string> {
     await ensureSchema(c)
     await c.query('SET FOREIGN_KEY_CHECKS=0')
     try {
-      for (const t of DELETE_ORDER) {
-        if (SYNC_TABLES.includes(t)) await c.query(`DELETE FROM \`${t}\``)
-      }
-      let count = 0
+      const bad = new Set<string>()
+      let pushed = 0
+      let removed = 0
+
+      // رفع الصفوف الجديدة/المعدلة فقط (upsert بالمفتاح الأساسي)
       for (const t of INSERT_ORDER) {
-        const data = readLocalTable(t)
-        if (!data) continue
-        const cols = data[0].cols
-        const rows = data.map((d) => d.rows)
-        count += rows.length
-        await c.query(
-          `INSERT INTO \`${t}\` (\`${cols.join('`,`')}\`) VALUES ?`,
-          [rows]
-        )
+        if (bad.has(t)) continue
+        let plan: ReturnType<typeof planPush>
+        try {
+          plan = planPush(TRANSPORT, t, readLocalRows(t))
+        } catch (e) {
+          console.error(`[SYNC:mysql] push/تخطيط ${t} فشل:`, e instanceof Error ? e.message : e)
+          bad.add(t)
+          continue
+        }
+        if (plan.upsert.length === 0) continue
+        const cols = Object.keys(plan.upsert[0])
+        const values = plan.upsert.map((r) => cols.map((cc) => mysqlValue(r[cc])))
+        const upd = cols.map((cc) => `\`${cc}\`=VALUES(\`${cc}\`)`).join(', ')
+        try {
+          await c.query(`INSERT INTO \`${t}\` (${cols.map((cc) => `\`${cc}\``).join(',')}) VALUES ? ON DUPLICATE KEY UPDATE ${upd}`, [values])
+          pushed += plan.upsert.length
+          console.log(`[SYNC:mysql] push ${t}: رفع ${plan.upsert.length} صفاً متغيّراً ✓`)
+        } catch (e) {
+          console.error(`[SYNC:mysql] push/${t} فشل:`, e instanceof Error ? e.message : e)
+          bad.add(t)
+        }
       }
-      return `تم رفع نسخة كاملة إلى MySQL (${count} صفاً في ${INSERT_ORDER.length} جداول)`
+
+      // حذف الصفوف المحذوفة محلياً (الأبناء قبل الآباء)
+      for (const t of DELETE_ORDER) {
+        if (bad.has(t)) continue
+        let deletes: (string | number)[] = []
+        try {
+          deletes = planPush(TRANSPORT, t, readLocalRows(t)).deletes
+        } catch {
+          bad.add(t)
+          continue
+        }
+        if (deletes.length === 0) continue
+        const col = pkColumn(t)
+        try {
+          for (let i = 0; i < deletes.length; i += 500) {
+            await c.query(`DELETE FROM \`${t}\` WHERE \`${col}\` IN (?)`, [deletes.slice(i, i + 500)])
+          }
+          removed += deletes.length
+          console.log(`[SYNC:mysql] push ${t}: حذف ${deletes.length} صفاً من البعيد (حُذفت محلياً) ✓`)
+        } catch (e) {
+          console.error(`[SYNC:mysql] push/حذف ${t} فشل:`, e instanceof Error ? e.message : e)
+          bad.add(t)
+        }
+      }
+
+      // تحديث baseline للجداول الناجحة فقط
+      for (const t of INSERT_ORDER) {
+        if (bad.has(t)) continue
+        try {
+          saveBaseline(TRANSPORT, t, readLocalRows(t))
+        } catch {
+          /* best effort */
+        }
+      }
+
+      if (bad.size > 0) {
+        throw new Error(`فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`)
+      }
+      return `تم رفع التعديلات إلى MySQL (${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً)`
     } finally {
       await c.query('SET FOREIGN_KEY_CHECKS=1')
     }
@@ -204,46 +265,33 @@ export async function mysqlPush(): Promise<string> {
   }
 }
 
+function mysqlValue(v: unknown): string | number | null {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (typeof v === 'object') return JSON.stringify(v)
+  return v as string | number
+}
+
 export async function mysqlPull(): Promise<string> {
   const c = await connect()
   try {
     await ensureSchema(c)
+    const data: Record<string, Record<string, unknown>[]> = {}
     let remote = 0
-    while (remote === 0) {
-      for (const t of SYNC_TABLES) {
-        const [rows] = await c.query(`SELECT COUNT(*) AS n FROM \`${t}\``) as unknown as [{ n: number }[], unknown]
-        remote += Number(rows[0].n)
-      }
-      if (remote === 0) throw new Error('لا توجد بيانات على الخادم بعد — ارفع نسخة أولاً')
-    }
-
-    const data: Record<string, { cols: string[]; rows: (string | number | null)[] }[]> = {}
     for (const t of SYNC_TABLES) {
-      const [rows] = await c.query(`SELECT * FROM \`${t}\``) as unknown as [Record<string, string | number | null>[], unknown]
-      if (rows.length === 0) continue
-      const cols = Object.keys(rows[0])
-      data[t] = rows.map((r) => ({ cols, rows: cols.map((cc) => r[cc]) }))
+      const [rows] = (await c.query(`SELECT * FROM \`${t}\``)) as unknown as [Record<string, string | number | null | Date>[], unknown]
+      data[t] = rows as unknown as Record<string, unknown>[]
+      remote += rows.length
     }
+    if (remote === 0) throw new Error('لا توجد بيانات على الخادم بعد — ارفع نسخة أولاً')
 
-    const db = getDb()
-    db.exec('BEGIN')
-    try {
-      for (const t of DELETE_ORDER) {
-        if (SYNC_TABLES.includes(t)) db.prepare(`DELETE FROM \`${t}\``).run()
-      }
-      for (const t of INSERT_ORDER) {
-        const recs = data[t]
-        if (!recs) continue
-        const cols = recs[0].cols
-        const stmt = db.prepare(`INSERT INTO \`${t}\` (\`${cols.join('`,`')}\`) VALUES (${cols.map(() => '?').join(',')})`)
-        for (const r of recs) stmt.run(...r.rows)
-      }
-      db.exec('COMMIT')
-    } catch (e) {
-      db.exec('ROLLBACK')
-      throw e
-    }
-    return 'تم سحب نسخة كاملة من MySQL واستبدال قاعدة البيانات المحلية'
+    // دمج في المكان داخل صفقة: لا مسح كامل ولا استبدال ملف
+    const counts = mergeIntoLocal(TRANSPORT, data, DELETE_ORDER, INSERT_ORDER)
+    lastPullChanged = counts.inserted + counts.updated + counts.deleted
+    console.log(
+      `[SYNC:mysql] pull انتهى: ${counts.inserted} إدراج، ${counts.updated} تحديث، ${counts.deleted} حذف`
+    )
+    return `تم سحب التغييرات من MySQL (${counts.inserted} جديد، ${counts.updated} معدّل، ${counts.deleted} محذوف)`
   } finally {
     await c.end()
   }
