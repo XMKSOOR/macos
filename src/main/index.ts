@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { config as loadEnv } from 'dotenv'
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { initDb, listDueRecurringExpenses, materializeDueRecurringExpenses } from './db'
@@ -145,19 +145,41 @@ const leftover = (await window.clinic.expenses.list()).filter(e => e.note === '�
   return win
 }
 
-app.whenReady().then(() => {
-  initDb()
-  registerIpc(ipcMain)
-  startAutoSync()
-  void runRecurringOnStart()
-  createWindow()
-  loadPackagedEnv()
-  void syncAllOnStart()
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+// تطبيق أحادي النسخة: يمنع نسختين من الكتابة على نفس قاعدة البيانات، ويضمن أن أي
+// دليل قفل `<db>.lock` موجود عند الإقلاع هو قفل قديم متروك يمكن تنظيفه بأمان.
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0)
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
   })
-})
+
+  app.whenReady().then(() => {
+    try {
+      initDb()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('INIT_DB_FAIL ' + msg)
+      dialog.showErrorBox('تعذّر فتح قاعدة البيانات', msg)
+      app.exit(1)
+      return
+    }
+    registerIpc(ipcMain)
+    startAutoSync()
+    void runRecurringOnStart()
+    createWindow()
+    loadPackagedEnv()
+    void syncAllOnStart()
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+}
 
 app.on('before-quit', (e) => {
   if (process.env['SKIP_SYNC'] === '1') return

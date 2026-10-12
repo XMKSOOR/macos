@@ -4,6 +4,7 @@ import {
   openSync,
   readSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeSync
@@ -54,6 +55,22 @@ function readFormatVersion(dbPath: string): number {
     return LEGACY_VERSION
   } finally {
     if (fd !== null) closeSync(fd)
+  }
+}
+
+/**
+ * محرّك SQLite (WebAssembly) يستخدم دليل `<db>.lock` كقفل كتابة، ويحذفه عند الإغلاق الطبيعي.
+ * لكن الإنهاء غير الطبيعي (انهيار/إغلاق قسري) يترك الدليل فيمنع كل تشغيل لاحق بخطأ
+ * "database is locked" وتعطّل فتح قاعدة البيانات. التطبيق أحادي النسخة، لذا أي قفل
+ * موجود عند الإقلاع هو قفل قديم متروك — ننظّفه قبل الفتح.
+ */
+function clearStaleLock(dbPath: string): void {
+  const lock = dbPath + '.lock'
+  try {
+    if (statSync(lock).isDirectory()) rmSync(lock, { recursive: true, force: true })
+    else unlinkSync(lock)
+  } catch {
+    /* لا يوجد قفل */
   }
 }
 
@@ -111,6 +128,7 @@ export class DatabaseSync {
   private readonly d: ns.Database
 
   constructor(path: string) {
+    clearStaleLock(path)
     if (existsSync(path) && readFormatVersion(path) === WAL_VERSION) convertWalToLegacy(path)
     this.d = new WasmDatabase(path)
   }
