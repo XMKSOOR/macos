@@ -4,6 +4,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { initDb, listDueRecurringExpenses, materializeDueRecurringExpenses } from './db'
+import { acquireSingleInstance, releaseSingleInstance } from './instance'
 import { registerIpc } from './ipc'
 import { startAutoSync, syncAllOnQuit, syncAllOnStart } from './autoSync'
 
@@ -147,8 +148,13 @@ const leftover = (await window.clinic.expenses.list()).filter(e => e.note === '�
 
 // تطبيق أحادي النسخة: يمنع نسختين من الكتابة على نفس قاعدة البيانات، ويضمن أن أي
 // دليل قفل `<db>.lock` موجود عند الإقلاع هو قفل قديم متروك يمكن تنظيفه بأمان.
-if (!app.requestSingleInstanceLock()) {
+// نستخدم حارسين: قفل Electron (للتركيز على النافذة الموجودة) وحارسنا الخاص
+// (ملف + PID) لأنه أكثر موثوقية في النسخة المثبّتة.
+const gotElectronLock = app.requestSingleInstanceLock()
+const gotOwnGuard = acquireSingleInstance()
+if (!gotElectronLock || !gotOwnGuard) {
   app.exit(0)
+  setTimeout(() => process.exit(0), 3000)
 } else {
   app.on('second-instance', () => {
     const win = BrowserWindow.getAllWindows()[0]
@@ -157,6 +163,8 @@ if (!app.requestSingleInstanceLock()) {
       win.focus()
     }
   })
+
+  app.on('will-quit', () => releaseSingleInstance())
 
   app.whenReady().then(() => {
     try {
@@ -184,9 +192,13 @@ if (!app.requestSingleInstanceLock()) {
 app.on('before-quit', (e) => {
   if (process.env['SKIP_SYNC'] === '1') return
   e.preventDefault()
-  const guard = setTimeout(() => app.exit(0), 20000)
+  const guard = setTimeout(() => {
+    releaseSingleInstance()
+    app.exit(0)
+  }, 20000)
   syncAllOnQuit().finally(() => {
     clearTimeout(guard)
+    releaseSingleInstance()
     app.exit(0)
   })
 })
