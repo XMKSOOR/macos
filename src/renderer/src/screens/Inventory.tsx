@@ -22,6 +22,7 @@ const cols: Col<Material>[] = [
   { key: 'min_qty', label: 'الحد الأدنى', type: 'number', width: 100 },
   { key: 'unit', label: 'الوحدة', width: 90 },
   { key: 'cost', label: 'الكلفة', type: 'money', width: 180 },
+  { key: 'total', label: 'الاجمالي', type: 'money', width: 180 },
   { key: 'supplier', label: 'المورد', width: 140 },
   { key: 'notes', label: 'ملاحظات', width: 160 }
 ]
@@ -39,6 +40,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     quantity: 0,
     min_qty: 0,
     cost: 0,
+    total: 0,
     supplier: '',
     notes: ''
   })
@@ -72,13 +74,45 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
   }, [toast])
 
   useEffect(() => {
-    load()
+    const t = setTimeout(() => load(search), 300)
+    return () => clearTimeout(t)
+  }, [search, load])
+
+  useEffect(() => {
     loadMovements()
-  }, [load, loadMovements])
+  }, [loadMovements])
 
   const openNew = (): void => {
-    setForm({ name: '', category: '', unit: '', quantity: 0, min_qty: 0, cost: 0, supplier: '', notes: '' })
+    setForm({ name: '', category: '', unit: '', quantity: 0, min_qty: 0, cost: 0, total: 0, supplier: '', notes: '' })
     setModal(true)
+  }
+
+  /** عند تغيير الكمية: نحافظ على الإجمالي ونعيد حساب الكلفة = الاجمالي ÷ الكمية، أو نحسب الإجمالي = الكلفة × الكمية */
+  const setQuantity = (v: number): void => {
+    setForm((f) => {
+      const q = Number(v) || 0
+      const t = Number(f.total) || 0
+      const c = Number(f.cost) || 0
+      if (t > 0 && q > 0) return { ...f, quantity: q, cost: Math.round(t / q) }
+      if (c > 0) return { ...f, quantity: q, total: c * q }
+      return { ...f, quantity: q }
+    })
+  }
+
+  /** عند إدخال الاجمالي: نقسمه على الكمية ونعطي الكلفة تلقائياً */
+  const setTotal = (lbp: number): void => {
+    setForm((f) => {
+      const q = Number(f.quantity) || 0
+      return { ...f, total: lbp || 0, cost: lbp > 0 && q > 0 ? Math.round(lbp / q) : f.cost }
+    })
+  }
+
+  /** عند إدخال الكلفة: نحسب الاجمالي تلقائياً = الكلفة × الكمية */
+  const setCost = (lbp: number): void => {
+    setForm((f) => {
+      const q = Number(f.quantity) || 0
+      return { ...f, cost: lbp || 0, total: lbp > 0 && q > 0 ? lbp * q : f.total }
+    })
   }
 
   const save = (): void => {
@@ -86,7 +120,14 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
       toast('الاسم مطلوب', 'error')
       return
     }
-    const data = { ...form, name: form.name.trim(), cost: Number(form.cost) || 0, min_qty: Number(form.min_qty) || 0 }
+    const total = Number(form.total) || 0
+    const data = {
+      ...form,
+      name: form.name.trim(),
+      cost: Number(form.cost) || 0,
+      min_qty: Number(form.min_qty) || 0,
+      total: total > 0 ? total : (Number(form.cost) || 0) * (Number(form.quantity) || 0)
+    }
     window.clinic.inventory
       .create(data)
       .then(() => {
@@ -113,8 +154,15 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
       const row = list.find((m) => m.id === Number(key))
       if (!row) return
-      await window.clinic.inventory.update(row.id, patch)
       const targetQty = patch.quantity !== undefined ? Number(patch.quantity) : row.quantity
+      const cost = patch.cost !== undefined ? Number(patch.cost) : row.cost
+      const next: Record<string, unknown> = { ...patch }
+      if (patch.total !== undefined) {
+        next.cost = targetQty > 0 ? Math.round(Number(patch.total) / targetQty) : cost
+      } else if (patch.cost !== undefined || patch.quantity !== undefined) {
+        next.total = cost * targetQty
+      }
+      await window.clinic.inventory.update(row.id, next)
       const delta = targetQty - row.quantity
       if (delta) {
         await window.clinic.inventory.adjust(row.id, delta, 'adjust', 'تعديل مباشر من الجدول')
@@ -123,6 +171,21 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     },
     [list, load, search]
   )
+
+  /** حساب حيّ داخل الجدول: الاجمالي = الكلفة × الكمية، وبالعكس الكلفة = الاجمالي ÷ الكمية */
+  const deriveDraft = useCallback((d: Record<string, string>, key: string): Record<string, string> => {
+    if (key === 'quantity' || key === 'cost') {
+      const q = Number(d.quantity) || 0
+      const c = Number(d.cost) || 0
+      return { ...d, total: String(Math.round(c * q)) }
+    }
+    if (key === 'total') {
+      const q = Number(d.quantity) || 0
+      const t = Number(d.total) || 0
+      return { ...d, cost: q > 0 ? String(Math.round(t / q)) : d.cost }
+    }
+    return d
+  }, [])
 
   const onImportRows = useCallback(
     async (rows: Record<string, string>[]) => {
@@ -161,6 +224,8 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
       min_qty: m.min_qty,
       cost: m.cost,
       cost_usd: m.cost_usd ?? 0,
+      total: m.total ?? 0,
+      total_usd: m.total_usd ?? 0,
       supplier: m.supplier,
       notes: m.notes
     }))
@@ -204,6 +269,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               rowKey={(m) => m.id}
               canEdit={canEdit}
               onSave={onRowSave}
+              onDraftChange={deriveDraft}
               moneyRate={rate}
               fixed
               selectable
@@ -321,7 +387,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
             </Field>
             <Field label="الكمية الافتتاحية">
-              <NumberInput value={Number(form.quantity) || 0} onChange={(v) => setForm({ ...form, quantity: v })} />
+              <NumberInput value={Number(form.quantity) || 0} onChange={setQuantity} />
             </Field>
             <Field label="الحد الأدنى">
               <NumberInput value={Number(form.min_qty) || 0} onChange={(v) => setForm({ ...form, min_qty: v })} />
@@ -334,20 +400,31 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
                   dual
                   valueLbp={Number(form.cost) || 0}
                   rate={rate}
-                  onChange={(lbp) => setForm({ ...form, cost: lbp })}
+                  onChange={setCost}
                   disabled={!can(role, 'editPrices')}
                   placeholder="0"
                 />
               </Field>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <div className="flex between" style={{ fontWeight: 800, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}>
-                  <span>القيمة الإجمالية (الكلفة × الكمية {form.quantity ? `${form.quantity} ${form.unit || ''}` : ''}):</span>
-                  <span>
-                    {fmt(Math.round((Number(form.cost) || 0) * (Number(form.quantity) || 0)))} ل.س (
-                    {(((Number(form.cost) || 0) * (Number(form.quantity) || 0)) / rate).toFixed(2)} $)
-                  </span>
+              <Field label="الاجمالي (تكلفة الصنف — ل.س أو $) — تُحسب الكلفة تلقائياً = الاجمالي ÷ الكمية">
+                <CurrencyInput
+                  dual
+                  valueLbp={Number(form.total) || 0}
+                  rate={rate}
+                  onChange={setTotal}
+                  placeholder="0"
+                />
+              </Field>
+              {Number(form.total) > 0 && (Number(form.quantity) || 0) > 0 && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="flex between" style={{ fontWeight: 800, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}>
+                    <span>الكلفة = الاجمالي ÷ الكمية</span>
+                    <span>
+                      {fmt(Number(form.total) || 0)} ل.س ÷ {Number(form.quantity) || 0} = <b>{fmt(Math.round((Number(form.total) || 0) / (Number(form.quantity) || 1)))}</b> ل.س ={' '}
+                      <b>{((Number(form.total) || 0) / (Number(form.quantity) || 1) / rate).toFixed(2)} $</b>
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
             <Field label="المورد">
               <input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
             </Field>

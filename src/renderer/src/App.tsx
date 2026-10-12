@@ -83,7 +83,7 @@ export default function App(): React.JSX.Element {
         .then(setSettings)
         .catch(() => {})
     }
-  }, [user, refreshKey])
+  }, [user, refreshKey, screen])
 
   useEffect(() => {
     if (!user) return

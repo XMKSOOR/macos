@@ -104,25 +104,6 @@ export default function SettingsScreen({
       .catch((e) => toast(e.message, 'error'))
   }
 
-  const convertCurrency = (): void => {
-    if (
-      !window.confirm(
-        'سيتم قسمة جميع المبالغ المحفوظة (أصناف الكتالوج، كلف المواد، الفواتير، المصاريف) وسعر الصرف على المعامل المحدد. هذه العملية دائمة، ويمكنك إعادة التحويل مرة أخرى عند الحاجة. متابعة؟'
-      )
-    ) {
-      return
-    }
-    setBusy('currency')
-    window.clinic.settings
-      .convertCurrency()
-      .then((msg) => {
-        toast(msg, 'success')
-        onSaved()
-      })
-      .catch((e) => toast(e.message, 'error'))
-      .finally(() => setBusy(''))
-  }
-
   return (
     <div>
       <div className="panel">
@@ -164,7 +145,7 @@ export default function SettingsScreen({
 
       <div className="panel">
         <div className="panel-head">
-          <h2>العملة (الليرة السورية والعملة المزدوجة)</h2>
+          <h2>العملة (سعر صرف الدولار)</h2>
         </div>
         <div className="panel-body">
           <div className="form-grid">
@@ -175,37 +156,14 @@ export default function SettingsScreen({
                 onChange={(e) => setForm({ ...form, usd_rate: parseNumber(e.target.value) })}
               />
             </Field>
-            <Field label="معامل حذف الأصفار من العملة">
-              <SearchSelect
-                value={form.currency_scale}
-                onChange={(v) => setForm({ ...form, currency_scale: v })}
-                options={[
-                  { value: '1', label: 'بدون تغيير (القيم القديمة)' },
-                  { value: '10', label: 'حذف صفر واحد' },
-                  { value: '100', label: 'حذف صفرين (العملة السورية الجديدة)' }
-                ]}
-              />
-            </Field>
-          </div>
-          <div className="flex mt-16" style={{ gap: 12 }}>
-            <span className={`badge ${form.currency_converted === '1' ? 'green' : 'amber'}`}>
-              {form.currency_converted === '1'
-                ? 'تم التحويل مرة — يمكن إعادة التحويل عند الحاجة'
-                : 'التحويل لم يُطبَّق بعد'}
-            </span>
           </div>
           <div className="toolbar mt-16">
-            <button className="soft" onClick={saveGeneral} disabled={busy === 'general' || busy === 'currency'}>
-              حفظ سعر الصرف والمعامل
-            </button>
-            <button className="danger-ghost" onClick={convertCurrency} disabled={busy === 'currency'}>
-              🔄 تحويل القيم إلى العملة الجديدة الآن
+            <button className="soft" onClick={saveGeneral} disabled={busy === 'general'}>
+              حفظ سعر الصرف
             </button>
           </div>
           <p className="muted mt-8" style={{ fontSize: 12 }}>
-            العملة الأساسية في البرنامج هي الليرة السورية (ل.س)، ويُعرض ما يقابلها بالدولار أسفلها.
-            عند الضغط تُقسَّم جميع المبالغ المحفوظة (أصناف الكتالوج، كلف المواد، الفواتير وبنودها، المصاريف) وسعر الصرف نفسه على المعامل (مثلاً 100):
-            يصبح 1,000,000 ل.س القديمة = 10,000 ل.س الجديدة، ويُعاد حساب كل مبالغ الدولار تلقائياً.
+            الدولار هو المرجع الثابت، وعند تغيير سعر الصرف تتغيّر قيمة الليرة السورية المقابلة تلقائياً.
           </p>
         </div>
       </div>

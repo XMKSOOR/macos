@@ -49,8 +49,7 @@ const api = {
   },
   settings: {
     get: (): Promise<Settings> => invoke('settings:get'),
-    save: (partial: object): Promise<Settings> => invoke('settings:save', partial),
-    convertCurrency: (): Promise<string> => invoke('currency:convert')
+    save: (partial: object): Promise<Settings> => invoke('settings:save', partial)
   },
   users: {
     list: (): Promise<User[]> => invoke('users:list'),

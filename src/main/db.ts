@@ -494,7 +494,14 @@ function ensureCurrencyColumns(): void {
   }
   add('catalog', 'price_usd', 'REAL NOT NULL DEFAULT 0')
   add('catalog', 'cost_usd', 'REAL NOT NULL DEFAULT 0')
+  add('catalog', 'qty', 'REAL NOT NULL DEFAULT 1')
+  add('catalog', 'total', 'INTEGER NOT NULL DEFAULT 0')
+  add('catalog', 'total_usd', 'REAL NOT NULL DEFAULT 0')
+  db.exec('UPDATE catalog SET total = price WHERE total = 0 AND price > 0')
   add('materials', 'cost_usd', 'REAL NOT NULL DEFAULT 0')
+  add('materials', 'total', 'INTEGER NOT NULL DEFAULT 0')
+  add('materials', 'total_usd', 'REAL NOT NULL DEFAULT 0')
+  db.exec('UPDATE materials SET total = cost * quantity WHERE total = 0 AND cost > 0 AND quantity > 0')
   add('invoices', 'subtotal_usd', 'REAL NOT NULL DEFAULT 0')
   add('invoices', 'discount_usd', 'REAL NOT NULL DEFAULT 0')
   add('invoices', 'total_usd', 'REAL NOT NULL DEFAULT 0')
@@ -508,45 +515,37 @@ function ensureCurrencyColumns(): void {
   add('expenses', 'last_generated', "TEXT NOT NULL DEFAULT ''")
 }
 
-/** إعادة حساب كل مبالغ الدولار من القيم المحلية حسب سعر الصرف الحالي */
+/**
+ * عند تغيّر سعر الصرف: الدولار هو المرجع الثابت، والليرة هي التي تتغيّر.
+ * لذلك نشتقّ القيم بالليرة من القيم المحفوظة بالدولار (بدل العكس) حتى لا ينخفض أو
+ * يرتفع المبلغ بالدولار عند تعديل سعر الصرف. السجلات التي لا تحوي قيمة دولارية بعد
+ * تُعبّأ من قيمتها بالليرة مرة واحدة فقط.
+ * أمّا الفواتير فتاريخية: تُحوّل بسعر الصرف المحفوظ لحظة إصدارها ولا تتأثّر بالسعر الحالي.
+ */
 export function recalcUsd(): void {
   const rate = getSettings().usd_rate
   if (!(rate > 0)) return
   const r = Number(rate)
   /** قسمة كسرية صحيحة: يجب «تعويم» البسط قبل القسمة لأن تقسيم عددين صحيحين في SQLite يكون تقسيمًا صحيحًا (30/130=0) */
   const R = (num: string, den: string): string => `ROUND(CAST(${num} AS REAL) / ${den}, 2)`
-  db.exec(`UPDATE catalog SET price_usd=${R('price', `${r}`)}, cost_usd=(
-    SELECT ${R('COALESCE(SUM(m.cost * cm.qty), 0)', `${r}`)} FROM catalog_materials cm JOIN materials m ON m.id=cm.material_id WHERE cm.catalog_id=catalog.id)`)
-  db.exec(`UPDATE materials SET cost_usd=${R('cost', `${r}`)}`)
+  db.exec(`UPDATE materials SET
+    cost = CASE WHEN cost_usd > 0 THEN ROUND(CAST(cost_usd AS REAL) * ${r}) ELSE cost END,
+    cost_usd = CASE WHEN cost_usd > 0 THEN cost_usd ELSE ${R('cost', `${r}`)} END,
+    total = CASE WHEN total_usd > 0 THEN ROUND(CAST(total_usd AS REAL) * ${r}) ELSE total END,
+    total_usd = CASE WHEN total_usd > 0 THEN total_usd ELSE ${R('total', `${r}`)} END`)
+  db.exec(`UPDATE catalog SET
+    price = CASE WHEN price_usd > 0 THEN ROUND(CAST(price_usd AS REAL) * ${r}) ELSE price END,
+    price_usd = CASE WHEN price_usd > 0 THEN price_usd ELSE ${R('price', `${r}`)} END,
+    total = CASE WHEN total_usd > 0 THEN ROUND(CAST(total_usd AS REAL) * ${r}) ELSE total END,
+    total_usd = CASE WHEN total_usd > 0 THEN total_usd ELSE ${R('total', `${r}`)} END,
+    cost_usd = (SELECT ROUND(COALESCE(SUM(m.cost_usd * cm.qty), 0), 2) FROM catalog_materials cm JOIN materials m ON m.id=cm.material_id WHERE cm.catalog_id=catalog.id)`)
+  db.exec(`UPDATE expenses SET
+    amount = CASE WHEN amount_usd > 0 THEN ROUND(CAST(amount_usd AS REAL) * ${r}) ELSE amount END,
+    amount_usd = CASE WHEN amount_usd > 0 THEN amount_usd ELSE ${R('amount', `${r}`)} END`)
   db.exec(
     `UPDATE invoices SET subtotal_usd=${R('subtotal', 'usd_rate')}, discount_usd=${R('discount', 'usd_rate')}, total_usd=${R('total', 'usd_rate')}, paid_usd=${R('paid', 'usd_rate')}`
   )
   db.exec(`UPDATE invoice_items SET cost_usd=${R('cost', '(SELECT usd_rate FROM invoices WHERE invoices.id=invoice_items.invoice_id)')}`)
-  db.exec(`UPDATE expenses SET amount_usd=${R('amount', `${r}`)}`)
-}
-
-/** تحويل القيم المحفوظة إلى العملة الجديدة (حذف الأصفار) مرة واحدة */
-export function applyCurrencyScale(force = false): string {
-  const s = getSettings()
-  const scale = Number(s.currency_scale || 1)
-  if (!(scale > 1)) return 'معامل التحويل غير صالح'
-  if (!force && s.currency_converted === '1') return 'القيم محوّلة بالفعل إلى العملة الجديدة'
-  db.exec('BEGIN')
-  try {
-    db.exec(`UPDATE catalog SET price=ROUND(CAST(price AS REAL)/${scale})`)
-    db.exec(`UPDATE materials SET cost=ROUND(CAST(cost AS REAL)/${scale})`)
-    db.exec(`UPDATE invoices SET usd_rate=ROUND(CAST(usd_rate AS REAL)/${scale}), subtotal=ROUND(CAST(subtotal AS REAL)/${scale}), discount=ROUND(CAST(discount AS REAL)/${scale}), total=ROUND(CAST(total AS REAL)/${scale}), paid=ROUND(CAST(paid AS REAL)/${scale})`)
-    db.exec(`UPDATE invoice_items SET cost=ROUND(CAST(cost AS REAL)/${scale})`)
-    db.exec(`UPDATE expenses SET amount=ROUND(CAST(amount AS REAL)/${scale})`)
-    db.exec(`UPDATE settings SET value=ROUND(CAST(value AS REAL)/${scale}) WHERE key='usd_rate'`)
-    db.prepare(`UPDATE settings SET value='1' WHERE key='currency_converted'`).run()
-    db.exec('COMMIT')
-  } catch (e) {
-    db.exec('ROLLBACK')
-    throw e
-  }
-  recalcUsd()
-  return `تم تحويل القيم إلى العملة الجديدة (قسمة على ${scale} = حذف ${String(scale).length - 1} أصفار)`
 }
 
 function seed(): void {
@@ -1252,10 +1251,13 @@ function catalogRow(row: Record<string, unknown>): CatalogItem {
     id,
     name: String(row.name),
     price,
+    qty: Number(row.qty) > 0 ? Number(row.qty) : 1,
+    total: Number(row.total) || 0,
     cost,
     margin,
     price_usd: Number(row.price_usd) || 0,
     cost_usd: Number(row.cost_usd) || 0,
+    total_usd: Number(row.total_usd) || 0,
     description: String(row.description ?? ''),
     created_at: String(row.created_at ?? ''),
     materials: mats
@@ -1283,20 +1285,31 @@ function recalcCatalogUsd(id: number): void {
   if (!(rate > 0)) return
   db.prepare(
     `UPDATE catalog SET price_usd=ROUND(CAST(price AS REAL)/${rate}, 2),
-     cost_usd=(SELECT ROUND(CAST(COALESCE(SUM(m.cost*cm.qty),0) AS REAL)/${rate}, 2) FROM catalog_materials cm JOIN materials m ON m.id=cm.material_id WHERE cm.catalog_id=?)
+     total_usd=ROUND(CAST(total AS REAL)/${rate}, 2),
+     cost_usd=(SELECT ROUND(COALESCE(SUM((CASE WHEN m.cost_usd > 0 THEN m.cost_usd ELSE CAST(m.cost AS REAL)/${rate} END) * cm.qty),0), 2) FROM catalog_materials cm JOIN materials m ON m.id=cm.material_id WHERE cm.catalog_id=?)
      WHERE id=?`
   ).run(id, id)
 }
 
 export function createCatalogItem(
-  c: Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials'> & { materials?: CatalogBomInput[] }
+  c: Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials' | 'qty' | 'total'> & {
+    qty?: number
+    total?: number
+    materials?: CatalogBomInput[]
+  }
 ): CatalogItem {
   const name = latinDigits(c.name)
   const priceN = numAny(c.price)
   const price = Number.isNaN(priceN) ? 0 : priceN
+  const qtyN = numAny(c.qty)
+  const qty = Number.isNaN(qtyN) || qtyN <= 0 ? 1 : qtyN
+  const totalN = numAny(c.total)
+  const total = Number.isNaN(totalN) ? 0 : totalN
   db.prepare('BEGIN').run()
   try {
-    const r = db.prepare('INSERT INTO catalog (name, price, description) VALUES (?,?,?)').run(name, price, latinDigits(c.description ?? ''))
+    const r = db
+      .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?)')
+      .run(name, price, qty, total, latinDigits(c.description ?? ''))
     const id = Number(r.lastInsertRowid)
     syncBom(id, c.materials ?? [])
     recalcCatalogUsd(id)
@@ -1323,6 +1336,16 @@ export function updateCatalogItem(
     if (c.price !== undefined) {
       const n = numAny(c.price)
       sets.push('price=?')
+      vals.push(Number.isNaN(n) ? 0 : n)
+    }
+    if (c.qty !== undefined) {
+      const n = numAny(c.qty)
+      sets.push('qty=?')
+      vals.push(Number.isNaN(n) || n <= 0 ? 1 : n)
+    }
+    if (c.total !== undefined) {
+      const n = numAny(c.total)
+      sets.push('total=?')
       vals.push(Number.isNaN(n) ? 0 : n)
     }
     if (c.description !== undefined) {
@@ -1357,14 +1380,30 @@ export function deleteCatalogItem(id: number): void {
 // ---- Materials / Inventory ----
 export function listMaterials(search?: string): Material[] {
   if (search) {
-    return db
-      .prepare('SELECT * FROM materials WHERE name LIKE ? OR category LIKE ? OR supplier LIKE ? ORDER BY name LIMIT 500')
-      .all(`%${search}%`, `%${search}%`, `%${search}%`) as unknown as Material[]
+    return (
+      db
+        .prepare('SELECT * FROM materials WHERE name LIKE ? OR category LIKE ? OR supplier LIKE ? ORDER BY name LIMIT 500')
+        .all(`%${search}%`, `%${search}%`, `%${search}%`) as unknown as Record<string, unknown>[]
+    ).map(mapMaterialRow)
   }
-  return db.prepare('SELECT * FROM materials ORDER BY name LIMIT 500').all() as unknown as Material[]
+  return (db.prepare('SELECT * FROM materials ORDER BY name LIMIT 500').all() as unknown as Record<string, unknown>[]).map(mapMaterialRow)
 }
 
-export function createMaterial(m: Omit<Material, 'id' | 'created_at'>): Material {
+function mapMaterialRow(r: Record<string, unknown>): Material {
+  const cost = Number(r.cost) || 0
+  const quantity = Number(r.quantity) || 0
+  return {
+    ...(r as unknown as Material),
+    cost,
+    quantity,
+    min_qty: Number(r.min_qty) || 0,
+    cost_usd: Number(r.cost_usd) || 0,
+    total: Number(r.total) || 0,
+    total_usd: Number(r.total_usd) || 0
+  }
+}
+
+export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> & { total?: number }): Material {
   const rate = getSettings().usd_rate
   const clean = { ...m, name: latinDigits(m.name), category: latinDigits(m.category ?? ''), unit: latinDigits(m.unit ?? ''), supplier: latinDigits(m.supplier ?? ''), notes: latinDigits(m.notes ?? '') }
   const costN = numAny(clean.cost)
@@ -1373,11 +1412,14 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at'>): Material
   const quantity = Number.isNaN(qtyN) ? 0 : qtyN
   const minN = numAny(clean.min_qty)
   const minQty = Number.isNaN(minN) ? 0 : minN
+  const totalN = numAny(clean.total)
+  const total = Number.isNaN(totalN) ? cost * quantity : totalN
   const costUsd = rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0
+  const totalUsd = rate > 0 ? Math.round((total / rate) * 100) / 100 : 0
   const r = db
-    .prepare('INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?)')
-    .run(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, clean.supplier, clean.notes)
-  return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+    .prepare('INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    .run(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes)
+  return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, total, total_usd: totalUsd, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
 }
 
 export function updateMaterial(id: number, m: Partial<Omit<Material, 'id' | 'created_at'>>): void {
@@ -1403,6 +1445,14 @@ export function updateMaterial(id: number, m: Partial<Omit<Material, 'id' | 'cre
     vals.push(cost)
     sets.push('cost_usd=?')
     vals.push(rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0)
+  }
+  if (m.total !== undefined) {
+    const t = numAny(m.total)
+    const total = Number.isNaN(t) ? 0 : t
+    sets.push('total=?')
+    vals.push(total)
+    sets.push('total_usd=?')
+    vals.push(rate > 0 ? Math.round((total / rate) * 100) / 100 : 0)
   }
   if (sets.length === 0) return
   vals.push(id)
@@ -1468,6 +1518,7 @@ export function importMaterials(rows: Record<string, string>[]): ImportResult {
       if (existing) {
         const cost = numAny(r.cost)
         const minQty = numAny(r.min_qty)
+        const total = numAny(r.total)
         updateMaterial(existing.id, {
           name,
           category: (r.category ?? '').trim() || existing.category,
@@ -1475,6 +1526,7 @@ export function importMaterials(rows: Record<string, string>[]): ImportResult {
           quantity: existing.quantity,
           min_qty: Number.isFinite(minQty) ? minQty : existing.min_qty,
           cost: Number.isFinite(cost) ? cost : existing.cost,
+          total: Number.isFinite(total) ? total : undefined,
           supplier: (r.supplier ?? '').trim() || existing.supplier,
           notes: (r.notes ?? '').trim() || existing.notes
         })
@@ -1490,6 +1542,7 @@ export function importMaterials(rows: Record<string, string>[]): ImportResult {
           quantity: Number.isFinite(qty) ? qty : 0,
           min_qty: numAny(r.min_qty) || 0,
           cost: numAny(r.cost) || 0,
+          total: numAny(r.total),
           supplier: (r.supplier ?? '').trim(),
           notes: (r.notes ?? '').trim()
         })
@@ -1516,6 +1569,8 @@ export function importCatalogRows(rows: Record<string, string>[]): ImportResult 
     }
     const rawPrice = String(r.price ?? '').trim()
     const price = rawPrice === '' ? NaN : numAny(rawPrice)
+    const qty = numAny(r.qty)
+    const total = numAny(r.total)
     const existing = db.prepare('SELECT * FROM catalog WHERE name=?').get(name) as unknown as
       | { id: number; name: string; price: number; description: string }
       | undefined
@@ -1523,6 +1578,8 @@ export function importCatalogRows(rows: Record<string, string>[]): ImportResult 
       updateCatalogItem(existing.id, {
         name,
         price: Number.isFinite(price) ? price : existing.price,
+        qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
+        total: Number.isFinite(total) ? total : undefined,
         description: (r.description ?? '').trim() || existing.description,
         materials: []
       })
@@ -1531,6 +1588,8 @@ export function importCatalogRows(rows: Record<string, string>[]): ImportResult 
       createCatalogItem({
         name,
         price: Number.isFinite(price) ? price : 0,
+        qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
+        total: Number.isFinite(total) ? total : undefined,
         description: (r.description ?? '').trim(),
         materials: []
       })
@@ -1824,10 +1883,15 @@ export function receiveMaterialInvoice(input: MaterialPurchaseInput): Expense {
       date: input.date,
       created_by: input.created_by
     })
-    db.prepare('UPDATE materials SET quantity = quantity + ?, cost=?, cost_usd=? WHERE id=?').run(
+    db.prepare('UPDATE materials SET quantity = quantity + ?, cost=?, cost_usd=?, total = (quantity + ?) * ?, total_usd = ROUND((CAST(quantity AS REAL) + ?) * ? / ?, 2) WHERE id=?').run(
       qty,
       unitCost,
       rate > 0 ? Math.round((unitCost / rate) * 100) / 100 : 0,
+      qty,
+      unitCost,
+      qty,
+      unitCost,
+      rate > 0 ? rate : 1,
       input.material_id
     )
     db.prepare('INSERT INTO stock_movements (material_id, qty, operation, reference, user_name, note) VALUES (?,?,?,?,?,?)').run(

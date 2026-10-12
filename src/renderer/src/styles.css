@@ -304,6 +304,20 @@ label {
 /* ---- Table ---- */
 .table-wrap {
   overflow: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* شريط تمرير أفقي إضافي أعلى الجدول (انعكاس متزامن للشريط السفلي) */
+.scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 14px;
+  margin-bottom: 2px;
+}
+.scroll-top > div {
+  height: 1px;
 }
 
 .table-toolbar {
@@ -485,8 +499,15 @@ table.data tr:hover td {
 
 .row-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+/* عمود إجراءات الجدول العام: عند ضيق المساحة تنزل الأزرار إلى سطر جديد بدل الخروج من الإطار */
+div.row-actions {
+  max-width: 172px;
 }
 
 /* ---- Badges ---- */

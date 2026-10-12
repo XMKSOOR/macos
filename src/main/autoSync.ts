@@ -7,6 +7,7 @@ import { driveRemote, driveUpload, driveDownload } from './sync'
 import { mysqlConfig, mysqlPush, mysqlPull, mysqlRemoteFp, mysqlPullChanged, resetMysqlPullChanged, mysqlSync } from './mysql'
 import { supabaseConfig, supabasePush, supabasePull, supabaseRemoteFp } from './supabase'
 import { cloudConfig, cloudPush, cloudPull, cloudRemoteFp, cloudPullChanged, resetCloudPullChanged, cloudSync } from './cloud'
+import { clearAllBaselines } from './syncDelta'
 
 const DEBOUNCE_MS = 3000
 const PERIOD_MS = 60 * 1000
@@ -357,6 +358,26 @@ export function markDirty(): void {
     debounceTimer = null
     void runAutoSync()
   }, DEBOUNCE_MS)
+}
+
+/**
+ * بعد استعادة نسخة احتياطية (من هذا الجهاز أو أي جهاز آخر): نجعل النسخة المستعادة هي
+ * المرجع. نصفّر بصمات المزامنة (baselines) وحالات النواقل حتى تُرفع كل الصفوف المستعادة
+ * إلى السحابة، ثم تنتشر تلقائياً إلى بقية الأجهزة (ويندوز/ماك/الجوال) في الدورة التالية.
+ * تُستدعى قبل markDirty (الذي يُستدعى تلقائياً بعد قناة db:restore).
+ */
+export function resetSyncForRestore(): void {
+  clearAllBaselines()
+  const now = new Date().toISOString()
+  for (const id of ['drive', 'mysql', 'supabase', 'cloud'] as const) {
+    try {
+      // حالة «تغيّر الطرفان» تُجبر المحرك على المزامنة (الثنائية للنواقل القائمة، والرفع لغيرها)
+      writeSyncState(id, { lastSyncAt: now, localHash: '', remoteHash: '', remoteRows: 0 })
+    } catch {
+      /* ignore */
+    }
+  }
+  console.log('[SYNC] أُعيدت تهيئة حالات المزامنة بعد استعادة نسخة احتياطية — النسخة المستعادة هي المرجع')
 }
 
 export function startAutoSync(): void {

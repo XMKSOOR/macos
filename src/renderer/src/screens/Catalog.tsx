@@ -7,6 +7,7 @@ import ExcelBar, { exportNow } from '../excel'
 import type { CatalogItem, Material, Role, Settings } from '../lib'
 import { can, fmt, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
+import { NumberInput } from '../NumberInput'
 
 interface BomLine {
   material_id: number
@@ -16,13 +17,32 @@ interface BomLine {
 interface CatalogForm {
   name: string
   price: string
+  qty: string
+  total: string
   description: string
   lines: BomLine[]
 }
 
 const makeCols = (rate: number): Col<CatalogItem>[] => [
   { key: 'name', label: 'الاسم' },
-  { key: 'price', label: 'السعر', type: 'money' },
+  {
+    key: 'qty',
+    label: 'الكمية',
+    type: 'display',
+    render: (c) => <span style={{ fontWeight: 600 }}>{fmt(c.qty && c.qty > 0 ? c.qty : 1)}</span>
+  },
+  { key: 'price', label: 'سعر الوحدة', type: 'money' },
+  {
+    key: 'total',
+    label: 'الاجمالي',
+    type: 'display',
+    render: (c) => (
+      <div className="money-cell">
+        <div className="amount-lbp">{fmt(c.total ?? 0)} ل.س</div>
+        {rate > 0 && <div className="amount-usd">{((c.total ?? 0) / rate).toFixed(2)} $</div>}
+      </div>
+    )
+  },
   {
     key: 'cost',
     label: 'الكلفة (من المكونات)',
@@ -69,7 +89,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState<'new' | 'edit' | null>(null)
   const [editing, setEditing] = useState<CatalogItem | null>(null)
-  const [form, setForm] = useState<CatalogForm>({ name: '', price: '', description: '', lines: [] })
+  const [form, setForm] = useState<CatalogForm>({ name: '', price: '', qty: '1', total: '', description: '', lines: [] })
   const [deleting, setDeleting] = useState<CatalogItem | null>(null)
   const toast = useToast()
 
@@ -112,10 +132,12 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
 
   const priceNum = Number(form.price) || bomCost || 0
   const marginNum = priceNum - bomCost
+  const qtyNum = Math.max(1, Math.floor(parseNumber(form.qty) || 1))
+  const totalNum = Number(form.total) || 0
 
   const openNew = (): void => {
     setEditing(null)
-    setForm({ name: '', price: '', description: '', lines: [] })
+    setForm({ name: '', price: '', qty: '1', total: '', description: '', lines: [] })
     setModal('new')
   }
 
@@ -124,10 +146,40 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
     setForm({
       name: c.name,
       price: String(c.price),
+      qty: String(c.qty && c.qty > 0 ? c.qty : 1),
+      total: c.total && c.total > 0 ? String(c.total) : '',
       description: c.description,
       lines: c.materials.map((m) => ({ material_id: m.material_id, qty: m.qty }))
     })
     setModal('edit')
+  }
+
+  /** عند تغيير الكمية: نحافظ على الاجمالي ونعيد حساب سعر الوحدة = الاجمالي ÷ الكمية، وإن كان الاجمالي فارغاً نحسبه من سعر الوحدة */
+  const setQty = (n: number): void => {
+    const q = Math.max(1, Math.floor(n) || 1)
+    setForm((f) => {
+      const t = Number(f.total) || 0
+      const p = Number(f.price) || 0
+      if (t > 0) return { ...f, qty: String(q), price: String(Math.round(t / q)) }
+      if (p > 0) return { ...f, qty: String(q), total: String(p * q) }
+      return { ...f, qty: String(q) }
+    })
+  }
+
+  /** عند إدخال الاجمالي: نقسمه على العدد ونعطي سعر الوحدة تلقائياً */
+  const setTotal = (lbp: number): void => {
+    setForm((f) => {
+      const q = Math.max(1, Math.floor(parseNumber(f.qty)) || 1)
+      return { ...f, total: lbp ? String(lbp) : '', price: lbp ? String(Math.round(lbp / q)) : f.price }
+    })
+  }
+
+  /** عند إدخال سعر الوحدة (الكلفة): نحسب الاجمالي تلقائياً = السعر × الكمية */
+  const setPrice = (lbp: number): void => {
+    setForm((f) => {
+      const q = Math.max(1, Math.floor(parseNumber(f.qty)) || 1)
+      return { ...f, price: lbp ? String(lbp) : '', total: lbp > 0 ? String(lbp * q) : f.total }
+    })
   }
 
   const setLine = (i: number, patch: Partial<BomLine>): void => {
@@ -139,9 +191,12 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
       toast('الاسم مطلوب', 'error')
       return
     }
+    const price = Number(form.price) || bomCost
     const payload = {
       name: form.name.trim(),
-      price: Number(form.price) || bomCost,
+      price,
+      qty: qtyNum,
+      total: totalNum > 0 ? totalNum : price * qtyNum,
       description: form.description,
       cost: bomCost,
       materials: form.lines.filter((l) => l.material_id).map((l) => ({ material_id: l.material_id, qty: l.qty || 1 }))
@@ -186,8 +241,11 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
   const exportRows = (rows: CatalogItem[] = filtered): Record<string, string | number>[] =>
     rows.map((c) => ({
       name: c.name,
+      qty: c.qty && c.qty > 0 ? c.qty : 1,
       price: c.price,
       price_usd: c.price_usd ?? 0,
+      total: c.total ?? 0,
+      total_usd: c.total_usd ?? 0,
       cost: c.cost,
       cost_usd: c.cost_usd ?? 0,
       margin: c.price - c.cost,
@@ -268,19 +326,41 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
             <Field label="الاسم *">
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
             </Field>
-            <Field label="سعر الخدمة (ل.س أو $)">
+            <Field label="الكمية">
+              <NumberInput value={qtyNum} onChange={setQty} placeholder="1" />
+            </Field>
+            <Field label="الاجمالي (تكلفة الصنف — ل.س أو $)">
+              <CurrencyInput
+                dual
+                valueLbp={totalNum}
+                rate={rate}
+                placeholder="0"
+                onChange={setTotal}
+              />
+            </Field>
+            <Field label="سعر الوحدة (ل.س أو $) — يُحسب الاجمالي تلقائياً = السعر × الكمية">
               <CurrencyInput
                 dual
                 valueLbp={Number(form.price) || 0}
                 rate={rate}
                 placeholder={bomCost ? String(bomCost) : '0'}
-                onChange={(lbp) => setForm({ ...form, price: lbp ? String(lbp) : '' })}
+                onChange={setPrice}
               />
             </Field>
             <Field label="الوصف">
               <input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </Field>
           </div>
+
+          {totalNum > 0 && (
+            <div
+              className="mt-8"
+              style={{ gridColumn: '1 / -1', fontSize: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px' }}
+            >
+              سعر الوحدة = {fmt(totalNum)} ل.س ÷ {qtyNum} = <b>{fmt(Math.round(totalNum / qtyNum))} ل.س</b> ={' '}
+              <b>{(totalNum / qtyNum / rate).toFixed(2)} $</b>
+            </div>
+          )}
 
           <div className="mt-16" style={{ fontWeight: 700 }}>
             المواد المكوّنة (تُخصم تلقائياً عند البيع)

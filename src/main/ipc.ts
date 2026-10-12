@@ -118,11 +118,11 @@ import type {
   RecallType
 } from '../shared/types'
 import { can } from '../shared/types'
-import { applyCurrencyScale, backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
+import { backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
 import { mysqlConfig, mysqlPull, mysqlPush, mysqlTest } from './mysql'
 import { supabaseConfig, supabasePull, supabasePush, supabaseTest } from './supabase'
 import { cloudPull, cloudPush, cloudTest } from './cloud'
-import { markDirty } from './autoSync'
+import { markDirty, resetSyncForRestore } from './autoSync'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
 
@@ -138,7 +138,6 @@ const MUTATION_SUFFIX =
   /:(create|update|delete|save|pay|adjust|import|importRows|purchase|setTooth|saveTooth|deleteTooth|complete|addItem|updateItem|deleteItem|runDue|changePassword|add)$/
 const MUTATION_EXACT = new Set([
   'settings:save',
-  'currency:convert',
   'db:restore',
   'db:changeLocation',
   'db:useLocal',
@@ -214,10 +213,6 @@ export function registerIpc(ipc: IpcMain): void {
     const s = saveSettings(args as Partial<Settings>)
     recalcUsd()
     return s
-  })
-  handle('currency:convert', () => {
-    requireAuth('manageSettings')
-    return applyCurrencyScale(true)
   })
 
   // ---- Users (admin) ----
@@ -819,6 +814,7 @@ export function registerIpc(ipc: IpcMain): void {
     })
     if (canceled || filePaths.length === 0) return null
     replaceDbFrom(filePaths[0])
+    resetSyncForRestore()
     return filePaths[0]
   })
 

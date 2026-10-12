@@ -68,11 +68,11 @@ export default function ExcelBar({ schema, title, buildRows, onImportRows }: Exc
   return (
     <>
       <button className="ghost small" title="تصدير البيانات إلى Excel" onClick={doExport}>
-        ⬇ تصدير Excel
+        ⬆ تصدير Excel
       </button>
       {onImportRows && (
         <button className="ghost small" title="استيراد من ملف Excel" onClick={() => void doPick()}>
-          ⬆ استيراد
+          ⬇ استيراد
         </button>
       )}
       {onImportRows && (

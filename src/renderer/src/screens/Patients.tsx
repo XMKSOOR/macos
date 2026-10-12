@@ -62,8 +62,9 @@ export default function Patients({
   )
 
   useEffect(() => {
-    load()
-  }, [load])
+    const t = setTimeout(() => load(search), 300)
+    return () => clearTimeout(t)
+  }, [search, load])
 
   const openNew = (): void => {
     setForm(empty)

@@ -82,14 +82,14 @@ export function upgradePricesToStudy(): void {
     db.prepare('BEGIN').run()
     try {
       const selMat = db.prepare('SELECT id FROM materials WHERE name=?')
-      const updMat = db.prepare('UPDATE materials SET category=?, unit=?, min_qty=?, cost=?, supplier=?, notes=? WHERE id=?')
+      const updMat = db.prepare('UPDATE materials SET category=?, unit=?, min_qty=?, cost=?, supplier=?, notes=?, total = ? * quantity WHERE id=?')
       const insMat = db.prepare(
-        "INSERT INTO materials (name, category, unit, quantity, min_qty, cost, supplier, notes, created_at) VALUES (?,?,?,?,?,?,?,?, datetime('now','localtime'))"
+        "INSERT INTO materials (name, category, unit, quantity, min_qty, cost, total, supplier, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?, datetime('now','localtime'))"
       )
       for (const m of SEED_MATERIALS) {
         const row = selMat.get(m.name) as { id: number } | undefined
-        if (row) updMat.run(m.category, m.unit, m.min_qty, m.cost, m.supplier, m.notes, row.id)
-        else insMat.run(m.name, m.category, m.unit, m.quantity, m.min_qty, m.cost, m.supplier, m.notes)
+        if (row) updMat.run(m.category, m.unit, m.min_qty, m.cost, m.supplier, m.notes, m.cost, row.id)
+        else insMat.run(m.name, m.category, m.unit, m.quantity, m.min_qty, m.cost, m.cost * m.quantity, m.supplier, m.notes)
       }
 
       const ids = new Map<string, number>()

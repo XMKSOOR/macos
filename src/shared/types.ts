@@ -114,10 +114,13 @@ export interface CatalogItem {
   id: number
   name: string
   price: number
+  qty: number
+  total: number
   cost: number
   margin: number
   price_usd?: number
   cost_usd?: number
+  total_usd?: number
   description: string
   created_at: string
   materials: { material_id: number; name: string; qty: number; unit: string; cost: number }[]
@@ -137,6 +140,8 @@ export interface Material {
   min_qty: number
   cost: number
   cost_usd?: number
+  total: number
+  total_usd?: number
   supplier: string
   notes: string
   created_at: string

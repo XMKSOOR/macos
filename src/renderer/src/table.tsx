@@ -47,6 +47,8 @@ interface DataGridProps<T> {
   onBulkDelete?: (rows: T[]) => void | Promise<void>
   /** تصدير الصفوف المحدَّدة (يعرض زر «تصدير المحدَّد» عند تزويده) */
   onBulkExport?: (rows: T[]) => void
+  /** عند تعديل خانة، يُستدعى لإعادة حساب الخانات المشتقّة حيّاً (مثل: الاجمالي = الكلفة × الكمية) */
+  onDraftChange?: (draft: Record<string, string>, key: string, row: T) => Record<string, string>
 }
 
 function parseCellValue(col: Col<unknown>, v: unknown): unknown {
@@ -84,7 +86,8 @@ export default function DataGrid<T>({
   autoSaveMs = 700,
   selectable,
   onBulkDelete,
-  onBulkExport
+  onBulkExport,
+  onDraftChange
 }: DataGridProps<T>): React.JSX.Element {
   const [editKey, setEditKey] = useState<number | string | null>(null)
   const [draft, setDraft] = useState<Record<string, string>>({})
@@ -96,6 +99,59 @@ export default function DataGrid<T>({
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
   const headRef = useRef<HTMLInputElement>(null)
+
+  // شريط تمرير أفقي إضافي أعلى الجدول (مُزامَن مع شريط الجدول السفلي)
+  const tableWrapRef = useRef<HTMLDivElement>(null)
+  const tableRef = useRef<HTMLTableElement>(null)
+  const topScrollRef = useRef<HTMLDivElement>(null)
+  const syncingRef = useRef(false)
+  const [tableW, setTableW] = useState(0)
+  const [wrapW, setWrapW] = useState(0)
+
+  const onWrapScroll = (): void => {
+    if (syncingRef.current) return
+    const w = tableWrapRef.current
+    const s = topScrollRef.current
+    if (w && s && s.scrollLeft !== w.scrollLeft) {
+      syncingRef.current = true
+      s.scrollLeft = w.scrollLeft
+      syncingRef.current = false
+    }
+  }
+  const onTopScroll = (): void => {
+    if (syncingRef.current) return
+    syncingRef.current = true
+    const w = tableWrapRef.current
+    const s = topScrollRef.current
+    if (w && s) w.scrollLeft = s.scrollLeft
+    syncingRef.current = false
+  }
+
+  // قياس عرض الجدول والحاوية لإظهار شريط التمرير العلوي عند وجود فيض أفقي فقط
+  useEffect(() => {
+    const t = tableRef.current
+    const w = tableWrapRef.current
+    if (!t || !w) return
+    let raf = 0
+    const update = (): void => {
+      setTableW(t.scrollWidth)
+      setWrapW(w.clientWidth)
+    }
+    const schedule = (): void => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(update)
+    }
+    update()
+    const ro = new ResizeObserver(schedule)
+    ro.observe(t)
+    ro.observe(w)
+    window.addEventListener('resize', schedule)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+      window.removeEventListener('resize', schedule)
+    }
+  }, [])
 
   // أحدث الحالات المطلوبة للحفظ التلقائي دون التعامل مع إغلاقات قديمة
   const latestRef = useRef({ editKey, draft, rows })
@@ -287,8 +343,9 @@ export default function DataGrid<T>({
                 ref={focusNoScroll}
                 onChange={(e) => {
                   const clean = sanitizeNumberInput(e.target.value)
-                  const next = { ...draft, [col.key]: clean }
+                  let next = { ...draft, [col.key]: clean }
                   if (draft[usdKey] !== undefined) delete next[usdKey]
+                  if (onDraftChange) next = onDraftChange(next, col.key, row)
                   setDraft(next)
                   markChanged(col.key)
                 }}
@@ -308,7 +365,9 @@ export default function DataGrid<T>({
                 value={usdDraft}
                 onChange={(e) => {
                   const u = sanitizeNumberInput(e.target.value)
-                  setDraft({ ...draft, [col.key]: u !== '' && Number.isFinite(Number(u)) ? String(Math.round(Number(u) * moneyRate!)) : '', [usdKey]: u })
+                  let next = { ...draft, [col.key]: u !== '' && Number.isFinite(Number(u)) ? String(Math.round(Number(u) * moneyRate!)) : '', [usdKey]: u }
+                  if (onDraftChange) next = onDraftChange(next, col.key, row)
+                  setDraft(next)
                   markChanged(col.key)
                 }}
                 onBlur={handleBlur}
@@ -328,7 +387,9 @@ export default function DataGrid<T>({
             value={draft[col.key] ?? ''}
             ref={focusNoScroll}
             onChange={(e) => {
-              setDraft({ ...draft, [col.key]: sanitizeNumberInput(e.target.value) })
+              let next = { ...draft, [col.key]: sanitizeNumberInput(e.target.value) }
+              if (onDraftChange) next = onDraftChange(next, col.key, row)
+              setDraft(next)
               markChanged(col.key)
             }}
             onBlur={handleBlur}
@@ -391,12 +452,24 @@ export default function DataGrid<T>({
 
   const showBulk = !!selectable && selected.size > 0
 
+  // أدنى عرض للجدول = مجموع عروض الأعمدة (+ عمود التحديد والإجراءات) حتى يتمكّن الجدول
+  // من التمرير أفقياً بدل ضغط الأعمدة وإخفاء محتواها على الشاشات الضيّقة.
+  const minTableWidth =
+    (selectable ? 38 : 0) +
+    cols.reduce((sum, c) => sum + (c.width ?? 130), 0) +
+    (actions ? 190 : 0)
+
   return (
     <>
-      <div className={`table-wrap ${className ?? ''}`}>
-        {toolbar && <div className="table-toolbar">{toolbar}</div>}
-        {err && <div className="inline-err">{err}</div>}
-        <table className={`data ${fixed ? 'fixed-cols' : ''}`}>
+      {toolbar && <div className="table-toolbar">{toolbar}</div>}
+      {err && <div className="inline-err">{err}</div>}
+      {tableW > wrapW + 1 && (
+        <div className="scroll-top" ref={topScrollRef} onScroll={onTopScroll} aria-hidden="true">
+          <div style={{ width: tableW }} />
+        </div>
+      )}
+      <div className={`table-wrap ${className ?? ''}`} ref={tableWrapRef} onScroll={onWrapScroll}>
+        <table ref={tableRef} className={`data ${fixed ? 'fixed-cols' : ''}`} style={{ minWidth: minTableWidth }}>
           <thead>
             <tr>
               {selectable && (
@@ -409,7 +482,7 @@ export default function DataGrid<T>({
                   {c.label}
                 </th>
               ))}
-              {actions && <th style={{ width: 150 }}>إجراءات</th>}
+              {actions && <th style={{ width: 190 }}>إجراءات</th>}
             </tr>
           </thead>
           <tbody>

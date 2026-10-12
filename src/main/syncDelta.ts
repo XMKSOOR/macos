@@ -34,6 +34,20 @@ export function ensureDeltaTable(): void {
   )
 }
 
+/**
+ * يمحو كل بصمات المزامنة (baselines). يُستدعى بعد استعادة نسخة احتياطية حتى تُعتبر
+ * كل الصفوف المستعادة «مغيّرة» فتُرفع كاملة إلى السحابة (المستعاد هو المرجع) بدل أن
+ * تتجاوزها المزامنة باعتبارها مُزامَنة سابقاً.
+ */
+export function clearAllBaselines(): void {
+  ensureDeltaTable()
+  try {
+    getDb().prepare(`DELETE FROM \`${META}\``).run()
+  } catch {
+    /* ignore */
+  }
+}
+
 /** اسم عمود المفتاح الأساسي للجدول (id تقريباً للكل، key لجدول الإعدادات) */
 export function pkColumn(tbl: string): string {
   assertSafeName(tbl)
