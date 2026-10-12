@@ -224,6 +224,32 @@ async function main() {
   check('total المحسوب = cost*quantity', Number(made.total) === 7000, made.total)
   check('cost_usd = round(cost/rate,2)', Number(made.cost_usd) === Math.round((1000 / rate) * 100) / 100, made.cost_usd)
 
+  // ===================================================================
+  section('المخزون: الاجمالي لا يأتي فارغاً إطلاقاً (إصلاح الأصناف القديمة)')
+  const emptyTotal = api.createMaterial({
+    name: 'Empty Total Item',
+    category: '',
+    unit: 'pc',
+    quantity: 8,
+    min_qty: 1,
+    cost: 250,
+    supplier: '',
+    notes: '',
+    total: 0
+  })
+  check('إنشاء صنف بإجمالٍ صريح 0', Number(emptyTotal.id) > 0, emptyTotal.id)
+  check('قاعدة: التخزين احتفظ بـ 0 كما أدخل المستخدم', Number(one('materials', 'id=' + emptyTotal.id).total) === 0)
+  const listedTotal = Number(api.listMaterials().find((m) => m.id === emptyTotal.id).total)
+  check('listMaterials لا يُرجع إجمالياً فارغاً — يشتق = cost*quantity', listedTotal === 2000, listedTotal)
+  const noEmpty = api.listMaterials().filter((m) => m.quantity > 0 && m.cost > 0).filter((m) => !m.total || Number(m.total) <= 0)
+  check('لا صف واحد بإجمالٍ فارغ بين أصناف الكلفة والكمية', noEmpty.length === 0, noEmpty.map((m) => m.name))
+  api.repairZeroMaterialTotals()
+  check('إصلاح الإقلاع يكتب الإجمالي في القاعدة', Number(one('materials', 'id=' + emptyTotal.id).total) === 2000)
+
+  const dashInv = Number(api.dashboardStats('365').inventory_value)
+  const sumTotals = api.listMaterials().reduce((s, m) => s + (Number(m.total) || 0), 0)
+  check('لوحة التحكم: الرصيد المجمّد = مجموع الإجمالي (لا التكلفة×الكمية)', dashInv === sumTotals, { dashboard: dashInv, sum: sumTotals })
+
   api.adjustStock(made.id, -3, 'adjust', '', 'Tester', 'test')
   check('adjustStock يغيّر الكمية', Number(one('materials', 'id=' + made.id).quantity) === 4)
 

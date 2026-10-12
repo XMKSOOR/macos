@@ -78,6 +78,7 @@ export function initDb(): void {
   }
   enableCloudDefaults()
   upgradePricesToStudy()
+  repairZeroMaterialTotals()
 }
 
 /** يملأ عنوان Supabase الافتراضي ويفعّل مزامنة Postgres تلقائياً (مرة واحدة) */
@@ -1379,27 +1380,46 @@ export function deleteCatalogItem(id: number): void {
 
 // ---- Materials / Inventory ----
 export function listMaterials(search?: string): Material[] {
+  const rate = getSettings().usd_rate
   if (search) {
     return (
       db
         .prepare('SELECT * FROM materials WHERE name LIKE ? OR category LIKE ? OR supplier LIKE ? ORDER BY name LIMIT 500')
         .all(`%${search}%`, `%${search}%`, `%${search}%`) as unknown as Record<string, unknown>[]
-    ).map(mapMaterialRow)
+    ).map((r) => mapMaterialRow(r, rate))
   }
-  return (db.prepare('SELECT * FROM materials ORDER BY name LIMIT 500').all() as unknown as Record<string, unknown>[]).map(mapMaterialRow)
+  return (db.prepare('SELECT * FROM materials ORDER BY name LIMIT 500').all() as unknown as Record<string, unknown>[]).map((r) => mapMaterialRow(r, rate))
 }
 
-function mapMaterialRow(r: Record<string, unknown>): Material {
+/** يُرجع إجمالياً غير فارغ دائماً: إذا لم يُخزَّن إجمالٍ (صفر/فارغ) يُشتق = الكلفة × الكمية */
+function mapMaterialRow(r: Record<string, unknown>, rate: number): Material {
   const cost = Number(r.cost) || 0
   const quantity = Number(r.quantity) || 0
+  const storedTotal = Number(r.total) || 0
+  const total = storedTotal > 0 ? storedTotal : cost * quantity
   return {
     ...(r as unknown as Material),
     cost,
     quantity,
     min_qty: Number(r.min_qty) || 0,
     cost_usd: Number(r.cost_usd) || 0,
-    total: Number(r.total) || 0,
-    total_usd: Number(r.total_usd) || 0
+    total,
+    total_usd: total > 0 && rate > 0 ? Math.round((total / rate) * 100) / 100 : 0
+  }
+}
+
+/** إصلاح تلقائي (يعمل كل إقلاع، بلا أثر ثانوي): أي إجمالي مخزون مفقود/صفر لصنف له كلفة وكمية يُحسب = كلفة × كمية */
+export function repairZeroMaterialTotals(): void {
+  try {
+    const rate = getSettings().usd_rate
+    const res = db
+      .prepare(
+        'UPDATE materials SET total=cost*quantity, total_usd=CASE WHEN ? > 0 THEN ROUND((cost*quantity)/?, 2) ELSE 0 END WHERE cost > 0 AND quantity > 0 AND (total IS NULL OR total <= 0)'
+      )
+      .run(rate, rate)
+    if (res.changes > 0) console.log(`REPAIR_MATERIAL_TOTALS ${res.changes}`)
+  } catch (e) {
+    console.error('REPAIR_MATERIAL_TOTALS_FAIL ' + (e instanceof Error ? e.message : String(e)))
   }
 }
 
@@ -2044,6 +2064,9 @@ export function dashboardStats(period: string): DashboardStats {
   const unpaid_total = (
     db.prepare("SELECT COALESCE(SUM(total-paid),0) s FROM invoices WHERE status!='paid'").get() as { s: number }
   ).s
+  const inventory_value = (
+    db.prepare('SELECT COALESCE(SUM(CASE WHEN total > 0 THEN total ELSE cost * quantity END),0) v FROM materials').get() as { v: number }
+  ).v
 
   const byIncome = db
     .prepare('SELECT date, SUM(paid) s FROM invoices WHERE date>=? GROUP BY date')
@@ -2079,6 +2102,7 @@ export function dashboardStats(period: string): DashboardStats {
     expenses,
     margin,
     materials_low,
+    inventory_value,
     unpaid_total,
     by_status,
     recent_invoices

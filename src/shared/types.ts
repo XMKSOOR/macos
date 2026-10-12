@@ -291,6 +291,7 @@ export interface DashboardStats {
   expenses: number
   margin: number
   materials_low: number
+  inventory_value: number
   unpaid_total: number
   by_status: { date: string; income: number; expenses: number }[]
   recent_invoices: Invoice[]

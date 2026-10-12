@@ -93,6 +93,11 @@ export default function Dashboard({
           <div className="sub">مادة بكمية حرجة</div>
         </div>
         <div className="card">
+          <div className="label">الرصيد المجمّد في المخزون</div>
+          <div className="value">{stats ? `$${((stats.inventory_value ?? 0) / rate).toFixed(2)}` : '—'}</div>
+          <div className="sub">{fmt(stats?.inventory_value ?? 0)} ل.س</div>
+        </div>
+        <div className="card">
           <div className="label">نسبة التحصيل</div>
           <div className="value">{stats ? `${conf}%` : '—'}</div>
           <div className="sub">من الدخل الإجمالي</div>

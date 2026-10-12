@@ -286,11 +286,11 @@ export default function Finances({ settings }: { settings: Settings | null }): R
     const breakEvenMonths = patientNet > 0 ? cap / patientNet : 0
     const extraCasesNeeded = patientNet > 0 && gapToTarget > 0 ? Math.ceil(gapToTarget / patientNet) : 0
 
-    // رأس المال المجمّد في المخزون
-    const inventoryValue = materials.reduce((s, m) => s + num(m.cost) * num(m.quantity), 0)
+    // رأس المال المجمّد في المخزون — يُحسب من الإجمالي المسجّل لكل مادة (وليس التكلفة)
+    const inventoryValue = materials.reduce((s, m) => s + num(m.total), 0)
     const inventoryPct = cap > 0 ? (inventoryValue / cap) * 100 : 0
     const lowStock = materials.filter((m) => num(m.min_qty) > 0 && num(m.quantity) <= num(m.min_qty))
-    const slowStock = materials.filter((m) => num(m.quantity) > 0 && num(m.cost) > 0 && num(m.quantity) * num(m.cost) > inventoryValue * 0.15)
+    const slowStock = materials.filter((m) => num(m.total) > 0 && num(m.total) > inventoryValue * 0.15)
 
     // أثر سعر الصرف: قيمة الفواتير المُصدَرة اليوم مقابل السعر المسجَّل وقت الإصدار
     const billedTotal = invoices.reduce((s, inv) => s + num(inv.total), 0)
