@@ -250,6 +250,33 @@ async function main() {
   const sumTotals = api.listMaterials().reduce((s, m) => s + (Number(m.total) || 0), 0)
   check('لوحة التحكم: الرصيد المجمّد = مجموع الإجمالي (لا التكلفة×الكمية)', dashInv === sumTotals, { dashboard: dashInv, sum: sumTotals })
 
+  const zeroQty = api.createMaterial({
+    name: 'Zero Qty Item',
+    category: '',
+    unit: 'pc',
+    quantity: 0,
+    min_qty: 0,
+    cost: 25,
+    supplier: '',
+    notes: '',
+    total: 0
+  })
+  const zListed = Number(api.listMaterials().find((m) => m.id === zeroQty.id).total)
+  check('صنف بكمية 0: الإجمالي = الكلفة (الكمية تُعامَل كـ 1)', zListed === 25, zListed)
+  const negQty = api.createMaterial({
+    name: 'Neg Qty Item',
+    category: '',
+    unit: 'pc',
+    quantity: -3,
+    min_qty: 0,
+    cost: 776,
+    supplier: '',
+    notes: '',
+    total: 0
+  })
+  const nListed = Number(api.listMaterials().find((m) => m.id === negQty.id).total)
+  check('صنف بكمية سالبة: الإجمالي = الكلفة (لا سالب/صفر)', nListed === 776, nListed)
+
   api.adjustStock(made.id, -3, 'adjust', '', 'Tester', 'test')
   check('adjustStock يغيّر الكمية', Number(one('materials', 'id=' + made.id).quantity) === 4)
 

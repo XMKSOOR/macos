@@ -155,12 +155,13 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
       const row = list.find((m) => m.id === Number(key))
       if (!row) return
       const targetQty = patch.quantity !== undefined ? Number(patch.quantity) : row.quantity
+      const effQty = targetQty > 0 ? targetQty : 1
       const cost = patch.cost !== undefined ? Number(patch.cost) : row.cost
       const next: Record<string, unknown> = { ...patch }
       if (patch.total !== undefined) {
-        next.cost = targetQty > 0 ? Math.round(Number(patch.total) / targetQty) : cost
+        next.cost = Math.round(Number(patch.total) / effQty)
       } else if (patch.cost !== undefined || patch.quantity !== undefined) {
-        next.total = cost * targetQty
+        next.total = cost * effQty
       }
       await window.clinic.inventory.update(row.id, next)
       const delta = targetQty - row.quantity
@@ -172,17 +173,18 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     [list, load, search]
   )
 
-  /** حساب حيّ داخل الجدول: الاجمالي = الكلفة × الكمية، وبالعكس الكلفة = الاجمالي ÷ الكمية */
+  /** حساب حيّ داخل الجدول: الاجمالي = الكلفة × الكمية، وبالعكس الكلفة = الاجمالي ÷ الكمية.
+   *  إذا كانت الكمية 0 أو أقل تُعامَل كـ 1 حتى لا يصبح الاجمالي صفراً ولا يفشل القسمة. */
   const deriveDraft = useCallback((d: Record<string, string>, key: string): Record<string, string> => {
+    const qRaw = Number(d.quantity) || 0
+    const q = qRaw > 0 ? qRaw : 1
     if (key === 'quantity' || key === 'cost') {
-      const q = Number(d.quantity) || 0
       const c = Number(d.cost) || 0
       return { ...d, total: String(Math.round(c * q)) }
     }
     if (key === 'total') {
-      const q = Number(d.quantity) || 0
       const t = Number(d.total) || 0
-      return { ...d, cost: q > 0 ? String(Math.round(t / q)) : d.cost }
+      return { ...d, cost: String(Math.round(t / q)) }
     }
     return d
   }, [])

@@ -1391,12 +1391,14 @@ export function listMaterials(search?: string): Material[] {
   return (db.prepare('SELECT * FROM materials ORDER BY name LIMIT 500').all() as unknown as Record<string, unknown>[]).map((r) => mapMaterialRow(r, rate))
 }
 
-/** يُرجع إجمالياً غير فارغ دائماً: إذا لم يُخزَّن إجمالٍ (صفر/فارغ) يُشتق = الكلفة × الكمية */
+/** يُرجع إجمالياً غير فارغ دائماً: الإجمالي = الكلفة × الكمية، وإذا كانت الكمية 0 أو أقل تُعامَل كـ 1
+ *  حتى لا يظهر الإجمالي صفراً للأصناف التي نفدت كميتها لكن كلفتها معروفة. */
 function mapMaterialRow(r: Record<string, unknown>, rate: number): Material {
   const cost = Number(r.cost) || 0
   const quantity = Number(r.quantity) || 0
   const storedTotal = Number(r.total) || 0
-  const total = storedTotal > 0 ? storedTotal : cost * quantity
+  const effQty = quantity > 0 ? quantity : 1
+  const total = cost > 0 ? cost * effQty : storedTotal
   return {
     ...(r as unknown as Material),
     cost,
@@ -1408,13 +1410,13 @@ function mapMaterialRow(r: Record<string, unknown>, rate: number): Material {
   }
 }
 
-/** إصلاح تلقائي (يعمل كل إقلاع، بلا أثر ثانوي): أي إجمالي مخزون مفقود/صفر لصنف له كلفة وكمية يُحسب = كلفة × كمية */
+/** إصلاح تلقائي (يعمل كل إقلاع): أي إجمالي مخزون مفقود/صفر لصنف له كلفة يُحسب = الكلفة × (الكمية أو 1) */
 export function repairZeroMaterialTotals(): void {
   try {
     const rate = getSettings().usd_rate
     const res = db
       .prepare(
-        'UPDATE materials SET total=cost*quantity, total_usd=CASE WHEN ? > 0 THEN ROUND((cost*quantity)/?, 2) ELSE 0 END WHERE cost > 0 AND quantity > 0 AND (total IS NULL OR total <= 0)'
+        "UPDATE materials SET total=cost*(CASE WHEN quantity > 0 THEN quantity ELSE 1 END), total_usd=CASE WHEN ? > 0 THEN ROUND(cost*(CASE WHEN quantity > 0 THEN quantity ELSE 1 END)/?, 2) ELSE 0 END WHERE cost > 0 AND (total IS NULL OR total <= 0)"
       )
       .run(rate, rate)
     if (res.changes > 0) console.log(`REPAIR_MATERIAL_TOTALS ${res.changes}`)
@@ -2065,7 +2067,7 @@ export function dashboardStats(period: string): DashboardStats {
     db.prepare("SELECT COALESCE(SUM(total-paid),0) s FROM invoices WHERE status!='paid'").get() as { s: number }
   ).s
   const inventory_value = (
-    db.prepare('SELECT COALESCE(SUM(CASE WHEN total > 0 THEN total ELSE cost * quantity END),0) v FROM materials').get() as { v: number }
+    db.prepare('SELECT COALESCE(SUM(CASE WHEN cost > 0 THEN cost * (CASE WHEN quantity > 0 THEN quantity ELSE 1 END) ELSE total END),0) v FROM materials').get() as { v: number }
   ).v
 
   const byIncome = db
