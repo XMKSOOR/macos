@@ -424,7 +424,16 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                     onChange={(v) => setMaterialId(Number(v))}
                     options={[
                       { value: 0, label: '— لا شيء (مصروف عادي) —' },
-                      ...materials.map((m) => ({ value: m.id, label: `${m.name}${m.unit ? ` (${m.unit})` : ''}` }))
+                      ...Array.from(
+                        new Map(
+                          materials
+                            .slice()
+                            .sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
+                            .map((m) => [m.name, m])
+                        ).values()
+                      )
+                        .sort((a, b) => a.name.localeCompare(b.name))
+                        .map((m) => ({ value: m.id, label: `${m.name}${m.unit ? ` (${m.unit})` : ''}` }))
                     ]}
                   />
                 </div>

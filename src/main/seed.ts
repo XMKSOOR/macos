@@ -131,3 +131,40 @@ export function upgradePricesToStudy(): void {
     console.error('إعادة وضع أسعار دراسة الجدوى فشلت:', e)
   }
 }
+
+/** حذف التكرار في كتالوج الأصناف: إبقاء أحدث صف لكل اسم (created_at ثم id) وحذف صفوف الربط المكرّرة.
+ *  عملية آمنة وقابلة للتكرار — لا تحذف أصنافاً ذات اسم فريد. */
+export function dedupeCatalog(): void {
+  const db = getDb()
+  try {
+    const rows = db.prepare('SELECT id, name FROM catalog ORDER BY created_at DESC, id DESC').all() as unknown as {
+      id: number
+      name: string
+    }[]
+    const seen = new Set<string>()
+    const drop: number[] = []
+    for (const r of rows) {
+      if (seen.has(r.name)) drop.push(r.id)
+      else seen.add(r.name)
+    }
+    if (drop.length === 0) return
+    db.prepare('BEGIN').run()
+    try {
+      const delBom = db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?')
+      const delCat = db.prepare('DELETE FROM catalog WHERE id=?')
+      for (const id of drop) {
+        delBom.run(id)
+        delCat.run(id)
+      }
+      db.prepare(
+        'DELETE FROM catalog_materials WHERE rowid NOT IN (SELECT MIN(rowid) FROM catalog_materials GROUP BY catalog_id, material_id)'
+      ).run()
+      db.prepare('COMMIT').run()
+    } catch (e) {
+      db.prepare('ROLLBACK').run()
+      throw e
+    }
+  } catch (e) {
+    console.error('تنظيف تكرار الكتالوج فشل:', e)
+  }
+}

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, rmSync, 
 import { join, basename, extname } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { dataDir, dbFilePath } from './config'
-import { seedDefaultData, upgradePricesToStudy, upgradeSeedsToStudy } from './seed'
+import { dedupeCatalog, seedDefaultData, upgradePricesToStudy, upgradeSeedsToStudy } from './seed'
 import type {
   Appointment,
   CatalogBomInput,
@@ -78,6 +78,7 @@ export function initDb(): void {
   }
   enableCloudDefaults()
   upgradePricesToStudy()
+  dedupeCatalog()
   repairZeroMaterialTotals()
 }
 
@@ -1527,12 +1528,12 @@ export function importMaterials(rows: Record<string, string>[]): ImportResult {
   db.prepare('BEGIN').run()
   try {
     for (const r of rows) {
-      const name = (r.name ?? '').trim()
+      const name = latinDigits((r.name ?? '').trim())
       if (!name) {
         skip++
         continue
       }
-      const existing = db.prepare('SELECT * FROM materials WHERE name=?').get(name) as unknown as
+      const existing = db.prepare('SELECT * FROM materials WHERE TRIM(name)=? COLLATE NOCASE').get(name) as unknown as
         | (Material & { quantity: number })
         | undefined
       const rawQty = String(r.quantity ?? '').trim()
@@ -1583,40 +1584,47 @@ export function importCatalogRows(rows: Record<string, string>[]): ImportResult 
   let ok = 0
   let updated = 0
   let skip = 0
-  for (const r of rows) {
-    const name = (r.name ?? '').trim()
-    if (!name) {
-      skip++
-      continue
+  db.prepare('BEGIN').run()
+  try {
+    for (const r of rows) {
+      const name = latinDigits((r.name ?? '').trim())
+      if (!name) {
+        skip++
+        continue
+      }
+      const rawPrice = String(r.price ?? '').trim()
+      const price = rawPrice === '' ? NaN : numAny(rawPrice)
+      const qty = numAny(r.qty)
+      const total = numAny(r.total)
+      const existing = db.prepare('SELECT * FROM catalog WHERE TRIM(name)=? COLLATE NOCASE').get(name) as unknown as
+        | { id: number; name: string; price: number; description: string }
+        | undefined
+      if (existing) {
+        updateCatalogItem(existing.id, {
+          name,
+          price: Number.isFinite(price) ? price : existing.price,
+          qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
+          total: Number.isFinite(total) ? total : undefined,
+          description: (r.description ?? '').trim() || existing.description,
+          materials: []
+        })
+        updated++
+      } else {
+        createCatalogItem({
+          name,
+          price: Number.isFinite(price) ? price : 0,
+          qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
+          total: Number.isFinite(total) ? total : undefined,
+          description: (r.description ?? '').trim(),
+          materials: []
+        })
+        ok++
+      }
     }
-    const rawPrice = String(r.price ?? '').trim()
-    const price = rawPrice === '' ? NaN : numAny(rawPrice)
-    const qty = numAny(r.qty)
-    const total = numAny(r.total)
-    const existing = db.prepare('SELECT * FROM catalog WHERE name=?').get(name) as unknown as
-      | { id: number; name: string; price: number; description: string }
-      | undefined
-    if (existing) {
-      updateCatalogItem(existing.id, {
-        name,
-        price: Number.isFinite(price) ? price : existing.price,
-        qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
-        total: Number.isFinite(total) ? total : undefined,
-        description: (r.description ?? '').trim() || existing.description,
-        materials: []
-      })
-      updated++
-    } else {
-      createCatalogItem({
-        name,
-        price: Number.isFinite(price) ? price : 0,
-        qty: Number.isFinite(qty) && qty > 0 ? qty : undefined,
-        total: Number.isFinite(total) ? total : undefined,
-        description: (r.description ?? '').trim(),
-        materials: []
-      })
-      ok++
-    }
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
   }
   return { ok, updated, skip }
 }
@@ -1628,15 +1636,15 @@ export function importPatients(rows: Record<string, string>[]): ImportResult {
   db.prepare('BEGIN').run()
   try {
     for (const r of rows) {
-      const name = (r.name ?? '').trim()
+      const name = latinDigits((r.name ?? '').trim())
       if (!name) {
         skip++
         continue
       }
-      const phone = (r.phone ?? '').trim()
+      const phone = latinDigits((r.phone ?? '').trim())
       const existing = phone
-        ? (db.prepare('SELECT * FROM patients WHERE phone=?').get(phone) as unknown as Patient | undefined)
-        : (db.prepare('SELECT * FROM patients WHERE name=?').get(name) as unknown as Patient | undefined)
+        ? (db.prepare('SELECT * FROM patients WHERE TRIM(phone)=? COLLATE NOCASE').get(phone) as unknown as Patient | undefined)
+        : (db.prepare('SELECT * FROM patients WHERE TRIM(name)=? COLLATE NOCASE').get(name) as unknown as Patient | undefined)
       if (existing) {
         updatePatient(existing.id, {
           name,

@@ -497,6 +497,40 @@ table.data tr:hover td {
   background: #f8fafc;
 }
 
+/* ---- Import preview selection ---- */
+.import-preview {
+  max-height: 55vh;
+  user-select: none;
+  cursor: default;
+}
+table.data.selectable th.sel-col,
+table.data.selectable td.sel-col {
+  width: 34px;
+  text-align: center;
+  padding: 0 6px;
+}
+table.data.selectable th.sel-col {
+  cursor: pointer;
+}
+table.data.selectable td.sel-col input,
+table.data.selectable th.sel-col input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+table.data.selectable tbody tr {
+  cursor: pointer;
+}
+table.data.selectable tbody tr.row-on td {
+  background: #dbeafe;
+}
+table.data.selectable tbody tr.row-on:hover td {
+  background: #cfe0fb;
+}
+table.data.selectable tbody tr:hover td {
+  background: #eef2f7;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
