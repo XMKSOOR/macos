@@ -1412,7 +1412,7 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> 
   const quantity = Number.isNaN(qtyN) ? 0 : qtyN
   const minN = numAny(clean.min_qty)
   const minQty = Number.isNaN(minN) ? 0 : minN
-  const totalN = numAny(clean.total)
+  const totalN = m.total === undefined || m.total === null ? NaN : numAny(clean.total)
   const total = Number.isNaN(totalN) ? cost * quantity : totalN
   const costUsd = rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0
   const totalUsd = rate > 0 ? Math.round((total / rate) * 100) / 100 : 0

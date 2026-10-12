@@ -193,7 +193,9 @@ export function mergeUpserts(
         insStmt = db.prepare(`INSERT INTO \`${tbl}\` (\`${cols.join('`,`')}\`) VALUES (${cols.map(() => '?').join(',')})`)
       }
       if (fields.length) {
-        updStmt = db.prepare(`UPDATE \`${tbl}\` SET \`${fields.join('`,`')}\`=? WHERE \`${pk}\`=?`)
+        updStmt = db.prepare(
+          `UPDATE \`${tbl}\` SET ${fields.map((c) => `\`${c}\`=?`).join(',')} WHERE \`${pk}\`=?`
+        )
       }
     }
     const remoteSig = rowSig(r)
