@@ -62,6 +62,20 @@ export function getDbPath(): string {
   return dbPath
 }
 
+/** ينفّذ العملية داخل معاملة ذرّية؛ وإن كانت هناك معاملة نشطة يعيد استخدامها بدل فتح واحدة متداخلة. */
+function withTx<T>(fn: () => T): T {
+  if (db.inTransaction) return fn()
+  db.prepare('BEGIN').run()
+  try {
+    const result = fn()
+    db.prepare('COMMIT').run()
+    return result
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+}
+
 export function initDb(): void {
   dbPath = dbFilePath()
   const dir = join(dbPath, '..')
@@ -1307,76 +1321,61 @@ export function createCatalogItem(
   const qty = Number.isNaN(qtyN) || qtyN <= 0 ? 1 : qtyN
   const totalN = numAny(c.total)
   const total = Number.isNaN(totalN) ? 0 : totalN
-  db.prepare('BEGIN').run()
-  try {
+  return withTx(() => {
     const r = db
       .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?)')
       .run(name, price, qty, total, latinDigits(c.description ?? ''))
     const id = Number(r.lastInsertRowid)
     syncBom(id, c.materials ?? [])
     recalcCatalogUsd(id)
-    db.prepare('COMMIT').run()
     return getCatalogItem(id)!
-  } catch (e) {
-    db.prepare('ROLLBACK').run()
-    throw e
-  }
+  })
 }
 
 export function updateCatalogItem(
   id: number,
   c: Partial<Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials'>> & { materials?: CatalogBomInput[] }
 ): void {
-  db.prepare('BEGIN').run()
-  try {
-    const sets: string[] = []
-    const vals: (string | number | null)[] = []
-    if (c.name !== undefined) {
-      sets.push('name=?')
-      vals.push(latinDigits(String(c.name ?? '')))
-    }
-    if (c.price !== undefined) {
-      const n = numAny(c.price)
-      sets.push('price=?')
-      vals.push(Number.isNaN(n) ? 0 : n)
-    }
-    if (c.qty !== undefined) {
-      const n = numAny(c.qty)
-      sets.push('qty=?')
-      vals.push(Number.isNaN(n) || n <= 0 ? 1 : n)
-    }
-    if (c.total !== undefined) {
-      const n = numAny(c.total)
-      sets.push('total=?')
-      vals.push(Number.isNaN(n) ? 0 : n)
-    }
-    if (c.description !== undefined) {
-      sets.push('description=?')
-      vals.push(latinDigits(String(c.description ?? '')))
-    }
+  const sets: string[] = []
+  const vals: (string | number | null)[] = []
+  if (c.name !== undefined) {
+    sets.push('name=?')
+    vals.push(latinDigits(String(c.name ?? '')))
+  }
+  if (c.price !== undefined) {
+    const n = numAny(c.price)
+    sets.push('price=?')
+    vals.push(Number.isNaN(n) ? 0 : n)
+  }
+  if (c.qty !== undefined) {
+    const n = numAny(c.qty)
+    sets.push('qty=?')
+    vals.push(Number.isNaN(n) || n <= 0 ? 1 : n)
+  }
+  if (c.total !== undefined) {
+    const n = numAny(c.total)
+    sets.push('total=?')
+    vals.push(Number.isNaN(n) ? 0 : n)
+  }
+  if (c.description !== undefined) {
+    sets.push('description=?')
+    vals.push(latinDigits(String(c.description ?? '')))
+  }
+  withTx(() => {
     if (sets.length) {
       vals.push(id)
       db.prepare(`UPDATE catalog SET ${sets.join(', ')} WHERE id=?`).run(...vals)
     }
     if (c.materials) syncBom(id, c.materials)
     recalcCatalogUsd(id)
-    db.prepare('COMMIT').run()
-  } catch (e) {
-    db.prepare('ROLLBACK').run()
-    throw e
-  }
+  })
 }
 
 export function deleteCatalogItem(id: number): void {
-  db.prepare('BEGIN').run()
-  try {
+  withTx(() => {
     db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?').run(id)
     db.prepare('DELETE FROM catalog WHERE id=?').run(id)
-    db.prepare('COMMIT').run()
-  } catch (e) {
-    db.prepare('ROLLBACK').run()
-    throw e
-  }
+  })
 }
 
 // ---- Materials / Inventory ----

@@ -119,6 +119,10 @@ export class DatabaseSync {
     this.d.exec(sql)
   }
 
+  get inTransaction(): boolean {
+    return this.d.inTransaction
+  }
+
   close(): void {
     if (this.d.isOpen) this.d.close()
   }
