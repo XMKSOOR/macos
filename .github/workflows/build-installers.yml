@@ -62,6 +62,24 @@ jobs:
       - name: Build installer
         run: npx electron-builder ${{ matrix.args }} --publish never
 
+      - name: Verify bundled app.env (Supabase keys)
+        shell: bash
+        run: |
+          found=$(find dist -name app.env -type f | head -1)
+          if [ -z "$found" ]; then
+            echo "::error::app.env غير موجود في الحزمة — ستعمل النسخة بدون مفاتيح Supabase (لن ترسل البيانات)."
+            exit 1
+          fi
+          sz=$(wc -c < "$found")
+          echo "وجدنا $found بحجم $sz بايت"
+          if [ "$sz" -lt 10 ]; then
+            echo "::error::app.env موجود لكنه فارغ — تأكد من ضبط أسرار Supabase."
+            exit 1
+          fi
+          mkdir -p envcheck
+          # نرفع أسماء المفاتيح فقط (بدون قيمها) للتأكد من تضمينها دون كشف الأسرار
+          grep -oE '^[A-Z_]+=' "$found" | sort -u | tee "envcheck/app.env.keys.txt"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
@@ -69,7 +87,8 @@ jobs:
             dist/*.exe
             dist/*.dmg
             dist/*.blockmap
-          if-no-files-found: error
+            envcheck/*
+          if-no-files-found: warn
 
   # only runs when a v* tag is pushed, merges all artifacts into one Release
   release:

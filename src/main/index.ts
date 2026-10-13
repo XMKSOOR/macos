@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { initDb, listDueRecurringExpenses, materializeDueRecurringExpenses } from './db'
 import { acquireSingleInstance, releaseSingleInstance } from './instance'
 import { registerIpc } from './ipc'
+import { installFileLogging, logEnvDiagnostics } from './logging'
 import { startAutoSync, syncAllOnQuit, syncAllOnStart } from './autoSync'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
@@ -16,21 +17,34 @@ const isDev = !!process.env['ELECTRON_RENDERER_URL']
  */
 app.commandLine.appendSwitch('lang', 'en-US')
 
+// نسخ كل مخرجات الطرفية إلى ملف سجل دائم (مهم في النسخة المثبّتة على ماك بلا طرفية).
+installFileLogging()
+
 /**
  * تحميل مفاتيح Supabase المضمّنة مع النسخة المثبّتة (resources/app.env).
- * لا يستبدل أي متغيّر بيئة موجود مسبقاً.
+ * يجرّب عدة مسارات بديلة على أنظمة مختلفة ولا يستبدل أي متغيّر بيئة موجود مسبقاً.
  */
 function loadPackagedEnv(): void {
+  const candidates = [
+    join(process.resourcesPath, 'app.env'),
+    join(app.getAppPath(), '..', 'app.env'),
+    join(app.getAppPath(), '.env'),
+    join(process.cwd(), 'app.env')
+  ]
   try {
-    const p = join(process.resourcesPath, 'app.env')
-    if (existsSync(p)) {
-      loadEnv({ path: p })
-      console.log('[ENV] تم تحميل app.env من موارد الحزمة')
-    } else {
-      console.warn('[ENV] لا يوجد resources/app.env — مفاتيح Supabase في النُسخ المثبّتة تأتي من .env فقط. إذا كانت المزامنة لا تعمل، أنشئ هذا الملف بالمفتاح.')
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        loadEnv({ path: p })
+        console.log(`[ENV] تم تحميل ملف المفاتيح: ${p}`)
+      }
+    }
+    if (!candidates.some((p) => existsSync(p))) {
+      console.warn(
+        '[ENV] لم يُعثر على أي ملف مفاتيح (app.env/.env) — مزامنة Supabase لن تعمل. تحقق من تضمين resources/app.env في الحزمة.'
+      )
     }
   } catch (e) {
-    console.error('[ENV] فشل تحميل app.env:', e instanceof Error ? e.message : e)
+    console.error('[ENV] فشل تحميل ملف المفاتيح:', e instanceof Error ? e.message : e)
   }
 }
 
@@ -181,6 +195,7 @@ if (!gotElectronLock || !gotOwnGuard) {
     void runRecurringOnStart()
     createWindow()
     loadPackagedEnv()
+    logEnvDiagnostics(process.resourcesPath)
     void syncAllOnStart()
 
     app.on('activate', () => {
