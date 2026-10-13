@@ -443,8 +443,8 @@ function PayModal({
           </div>
         </div>
       </div>
-      <Field label="مبلغ الدفعة (ل.س)">
-        <input type="text" dir="ltr" inputMode="decimal" value={amount} onChange={(e) => setAmount(parseNumber(e.target.value))} autoFocus />
+      <Field label="مبلغ الدفعة (ل.س أو $)">
+        <CurrencyInput dual valueLbp={amount} rate={rate} onChange={setAmount} />
       </Field>
       <p className="muted mt-8" style={{ fontSize: 12 }}>
         بعد الدفعة يبقى: {(remaining - amount).toLocaleString('en-US')} ل.س = {(((remaining - amount) / rate)).toFixed(2)} $
@@ -513,6 +513,12 @@ function InvoiceEditor({
 
   const subtotal = useMemo(() => lines.reduce((s, l) => s + l.cost * l.qty, 0), [lines])
   const total = Math.max(0, subtotal - discount)
+
+  const lineMatCost = (l: Line): number =>
+    l.materials.reduce(
+      (s, x) => s + (materials.find((mm) => mm.id === x.material_id)?.cost ?? 0) * x.qty,
+      0
+    )
 
   const save = (): void => {
     if (!patientId) {
@@ -624,9 +630,16 @@ function InvoiceEditor({
             <input className="qty-input" type="text" dir="ltr" inputMode="decimal" value={l.qty} onChange={(e) => updateLine(l.key, { qty: Math.max(1, parseNumber(e.target.value) || 1) })} />
             <CurrencyInput compact valueLbp={l.cost} rate={usdRate} onChange={(lbp) => updateLine(l.key, { cost: lbp })} placeholder="0" />
             <div className="amount-lbp">{fmt(l.cost * l.qty)}</div>
-            <button className="soft small" onClick={() => setMatFor(l.key)}>
-              {l.materials.length > 0 ? `${l.materials.length} مواد` : 'اختيار'}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+              <button className="soft small" onClick={() => setMatFor(l.key)}>
+                {l.materials.length > 0 ? `${l.materials.length} مواد` : 'اختيار'}
+              </button>
+              {l.materials.length > 0 && (
+                <span className="muted" style={{ fontSize: 11 }}>
+                  كلفة المواد: {fmt(lineMatCost(l))} ل.س
+                </span>
+              )}
+            </div>
             <button className="danger-ghost small" onClick={() => removeLine(l.key)}>
               ✕
             </button>
@@ -672,6 +685,15 @@ function MaterialPicker({
   const [pick, setPick] = useState(0)
   const [qty, setQty] = useState(1)
 
+  const matTotal = useMemo(
+    () =>
+      sel.reduce((s, x) => {
+        const m = materials.find((mm) => mm.id === x.material_id)
+        return s + (m ? m.cost * x.qty : 0)
+      }, 0),
+    [sel, materials]
+  )
+
   const add = (): void => {
     if (!pick) return
     setSel((s) => {
@@ -698,7 +720,7 @@ function MaterialPicker({
               onChange={(v) => setPick(Number(v))}
               options={[
                 { value: 0, label: 'اختر المادة...' },
-                ...materials.map((m) => ({ value: m.id, label: `${m.name} (متوفر ${m.quantity})` }))
+                ...materials.map((m) => ({ value: m.id, label: `${m.name} — ${fmt(m.cost)} ل.س (متوفر ${m.quantity})` }))
               ]}
             />
             <input type="text" dir="ltr" inputMode="decimal" value={qty} onChange={(e) => setQty(Math.max(1, parseNumber(e.target.value) || 1))} style={{ width: 80 }} />
@@ -711,7 +733,9 @@ function MaterialPicker({
               <thead>
                 <tr>
                   <th>المادة</th>
+                  <th>السعر (ل.س)</th>
                   <th>الكمية</th>
+                  <th>المجموع (ل.س)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -721,7 +745,9 @@ function MaterialPicker({
                   return (
                     <tr key={s.material_id}>
                       <td>{m?.name ?? `#${s.material_id}`}</td>
+                      <td>{m ? fmt(m.cost) : '—'}</td>
                       <td>{s.qty}</td>
+                      <td>{m ? fmt(m.cost * s.qty) : '—'}</td>
                       <td>
                         <button className="danger-ghost small" onClick={() => remove(s.material_id)}>
                           ✕
@@ -732,12 +758,23 @@ function MaterialPicker({
                 })}
                 {sel.length === 0 && (
                   <tr>
-                    <td colSpan={3}>
+                    <td colSpan={5}>
                       <Empty text="لا مواد مستهلكة" />
                     </td>
                   </tr>
                 )}
               </tbody>
+              {sel.length > 0 && (
+                <tfoot>
+                  <tr>
+                    <td colSpan={3} style={{ fontWeight: 700 }}>
+                      مجموع كلفة المواد
+                    </td>
+                    <td style={{ fontWeight: 700 }}>{fmt(matTotal)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>

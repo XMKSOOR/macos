@@ -118,7 +118,7 @@ export default function Dashboard({
                   <YAxis tick={{ fontSize: 11 }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="income" name="الدخل" fill="#0e7c66" />
+                  <Bar dataKey="income" name="الدخل" fill="#475569" />
                   <Bar dataKey="expenses" name="المصاريف" fill="#dc2626" />
                 </BarChart>
               </ResponsiveContainer>
