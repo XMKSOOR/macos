@@ -79,6 +79,15 @@ jobs:
           mkdir -p envcheck
           # نرفع أسماء المفاتيح فقط (بدون قيمها) للتأكد من تضمينها دون كشف الأسرار
           grep -oE '^[A-Z_]+=' "$found" | sort -u | tee "envcheck/app.env.keys.txt"
+          # تأكد أن كل مفتاح له قيمة غير فارغة (دون طباعة القيم)
+          while IFS= read -r line; do
+            name="${line%%=*}"
+            val="${line#*=}"
+            if [ -z "$val" ]; then
+              echo "::error::المفتاح $name في app.env فارغ — ستفشل مزامنة السحابة."
+              exit 1
+            fi
+          done < "$found"
 
       - uses: actions/upload-artifact@v4
         with:

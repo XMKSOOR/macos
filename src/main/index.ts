@@ -181,6 +181,9 @@ if (!gotElectronLock || !gotOwnGuard) {
   app.on('will-quit', () => releaseSingleInstance())
 
   app.whenReady().then(() => {
+    // تحميل مفاتيح Supabase قبل تهيئة القاعدة حتى تُحفظ في الإعدادات عند أول تشغيل.
+    loadPackagedEnv()
+    logEnvDiagnostics(process.resourcesPath)
     try {
       initDb()
     } catch (e) {
@@ -194,8 +197,6 @@ if (!gotElectronLock || !gotOwnGuard) {
     startAutoSync()
     void runRecurringOnStart()
     createWindow()
-    loadPackagedEnv()
-    logEnvDiagnostics(process.resourcesPath)
     void syncAllOnStart()
 
     app.on('activate', () => {

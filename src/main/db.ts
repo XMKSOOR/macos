@@ -102,6 +102,18 @@ function enableCloudDefaults(): void {
     db.prepare("UPDATE settings SET value=? WHERE key='supabase_url' AND (value IS NULL OR value='')").run(
       'https://mroziduublsrcogojvcp.supabase.co'
     )
+    // احفظ المفتاح القادم من ملف المفاتيح داخل الإعدادات إن لم يكن محفوظاً بعد،
+    // حتى يبقى متاحاً بعد التحديثات (وفي النسخة المثبّتة يُضمَّن app.env في الموارد).
+    const envKey = (
+      process.env['SUPABASE_SECRET_KEY'] ??
+      process.env['SUPABASE_SERVICE_ROLE_KEY'] ??
+      ''
+    ).trim()
+    if (envKey) {
+      db.prepare(
+        "UPDATE settings SET value=? WHERE key='supabase_key' AND (value IS NULL OR value='')"
+      ).run(envKey)
+    }
     db.prepare("UPDATE settings SET value='1' WHERE key IN ('supabase_auto','supabase_pg_auto')").run()
   } catch (e) {
     console.error('تهيئة إعدادات المزامنة السحابية فشلت:', e)
