@@ -1,5 +1,5 @@
 export interface User {
-  id: number
+  id: string
   username: string
   role: Role
   full_name: string
@@ -12,7 +12,7 @@ export interface LoginResult {
 }
 
 export interface Patient {
-  id: number
+  id: string
   name: string
   phone: string
   birth_date: string
@@ -36,8 +36,8 @@ export type MedicationCategory = 'prescription' | 'otc' | 'supplement' | 'herbal
 
 /** سجل أدوية المريض: الأدوية الحرة والموصوفة والمكملات */
 export interface Medication {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   /** الاسم العلمي (المادة الفعالة) */
   scientific_name: string
   /** الاسم التجاري (المطبوع على العلبة) */
@@ -74,7 +74,7 @@ export type MedicationInput = Omit<Medication, 'id' | 'created_at'>
 
 /** دواء في القائمة المرجعية (تعبئة سريعة للوصفة) */
 export interface Medicine {
-  id: number
+  id: string
   trade_name: string
   scientific_name: string
   dose: string
@@ -89,8 +89,8 @@ export type MedicineInput = Omit<Medicine, 'id' | 'created_at'>
 
 /** وصفة طبية جاهزة للطباعة */
 export interface PrescriptionRequest {
-  patientId: number
-  medicationIds: number[]
+  patientId: string
+  medicationIds: string[]
   diagnosis?: string
   note?: string
 }
@@ -98,8 +98,8 @@ export interface PrescriptionRequest {
 export type PatientReportMode = 'brief' | 'full'
 
 export interface Appointment {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   date: string
   time: string
   reason: string
@@ -111,7 +111,7 @@ export interface Appointment {
 }
 
 export interface CatalogItem {
-  id: number
+  id: string
   name: string
   price: number
   qty: number
@@ -123,16 +123,16 @@ export interface CatalogItem {
   total_usd?: number
   description: string
   created_at: string
-  materials: { material_id: number; name: string; qty: number; unit: string; cost: number }[]
+  materials: { material_id: string; name: string; qty: number; unit: string; cost: number }[]
 }
 
 export interface CatalogBomInput {
-  material_id: number
+  material_id: string
   qty: number
 }
 
 export interface Material {
-  id: number
+  id: string
   name: string
   category: string
   unit: string
@@ -148,8 +148,8 @@ export interface Material {
 }
 
 export interface StockMovement {
-  id: number
-  material_id: number
+  id: string
+  material_id: string
   qty: number
   operation: 'add' | 'adjust' | 'sale' | 'waste'
   reference: string
@@ -163,13 +163,13 @@ export interface InvoiceItemInput {
   name: string
   cost: number
   qty: number
-  catalog_id: number | null
-  materials: { material_id: number; qty: number }[]
+  catalog_id: string | null
+  materials: { material_id: string; qty: number }[]
 }
 
 export interface InvoiceItem extends InvoiceItemInput {
-  id: number
-  invoice_id: number
+  id: string
+  invoice_id: string
   cost_usd?: number
 }
 
@@ -177,8 +177,8 @@ export type InvoiceStatus = 'unpaid' | 'partial' | 'paid'
 
 /** مرفق محلي (صورة، صورة أشعة/DICOM، أو ملف) يخصّ مريضاً */
 export interface PatientAttachment {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   /** الاسم الأصلي للملف كما اختاره المستخدم */
   filename: string
   /** اسم الملف على القرص داخل مجلد بيانات التطبيق */
@@ -201,9 +201,9 @@ export interface PatientFileResult {
 }
 
 export interface Invoice {
-  id: number
+  id: string
   invoice_no: string
-  patient_id: number
+  patient_id: string
   date: string
   usd_rate: number
   subtotal: number
@@ -228,7 +228,7 @@ export interface Invoice {
 export type Recurrence = 'weekly' | 'monthly' | 'quarterly' | 'yearly'
 
 export interface Expense {
-  id: number
+  id: string
   category: string
   amount: number
   amount_usd?: number
@@ -244,7 +244,7 @@ export interface Expense {
 
 /** مصروف متكرر يستحق خلال الأيام القادمة */
 export interface DueRecurringExpense {
-  id: number
+  id: string
   category: string
   amount: number
   note: string
@@ -486,8 +486,8 @@ export type ToothCondition = 'healthy' | 'caries' | 'filling' | 'crown' | 'missi
 export type ToothSurface = 'M' | 'D' | 'O' | 'B' | 'L'
 
 export interface DentalChartEntry {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   tooth_number: string
   condition: ToothCondition
   surfaces: string
@@ -499,8 +499,8 @@ export interface DentalChartEntry {
 export type TreatmentPlanStatus = 'proposed' | 'accepted' | 'in_progress' | 'completed' | 'cancelled'
 
 export interface TreatmentPlanItem {
-  id: number
-  plan_id: number
+  id: string
+  plan_id: string
   tooth_number: string
   procedure_name: string
   cost: number
@@ -510,8 +510,8 @@ export interface TreatmentPlanItem {
 }
 
 export interface TreatmentPlan {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   title: string
   status: TreatmentPlanStatus
   total_cost: number
@@ -522,8 +522,8 @@ export interface TreatmentPlan {
 }
 
 export interface PeriodontalChartEntry {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   tooth_number: string
   pocket_depth: number
   bleeding: number
@@ -534,7 +534,7 @@ export interface PeriodontalChartEntry {
 }
 
 export interface ProcedureTemplate {
-  id: number
+  id: string
   name: string
   category: string
   description: string
@@ -546,8 +546,8 @@ export interface ProcedureTemplate {
 export type RecallType = 'checkup' | 'cleaning' | 'followup'
 
 export interface RecallReminder {
-  id: number
-  patient_id: number
+  id: string
+  patient_id: string
   recall_type: RecallType
   due_date: string
   status: 'pending' | 'done' | 'cancelled'

@@ -28,7 +28,7 @@ function conditionColor(condition: string | undefined): string {
   return CONDITIONS.find((c) => c.value === condition)?.color ?? '#e2e8f0'
 }
 
-function Thumb({ id }: { id: number }): React.JSX.Element {
+function Thumb({ id }: { id: string }): React.JSX.Element {
   const [url, setUrl] = useState('')
   useEffect(() => {
     let alive = true
@@ -43,6 +43,15 @@ function Thumb({ id }: { id: number }): React.JSX.Element {
     }
   }, [id])
   return url ? <img src={url} alt="" /> : <span className="odo-loading">…</span>
+}
+
+type ToothKind = 'molar' | 'premolar' | 'anterior'
+
+function toothKind(tooth: string): ToothKind {
+  const n = Number(tooth[1]) || Number(tooth)
+  if (n >= 6) return 'molar'
+  if (n >= 4) return 'premolar'
+  return 'anterior'
 }
 
 function ToothCell({
@@ -67,24 +76,59 @@ function ToothCell({
   }
   const short = CONDITIONS.find((c) => c.value === cond)?.short ?? ''
   const label = CONDITIONS.find((c) => c.value === cond)?.label ?? 'سليم'
+  const kind = toothKind(tooth)
+  const clipId = `tooth-clip-${tooth}`
+  const outline = hasCond ? color : '#cbd5e1'
+  const shape =
+    kind === 'anterior'
+      ? { path: 'M9,49 V21 C9,10 13,3 20,3 C27,3 31,10 31,21 V49 Z' }
+      : { x: kind === 'molar' ? 2 : 5, w: kind === 'molar' ? 36 : 30 }
   return (
     <button
       type="button"
-      className={`odo-tooth ${selected ? 'sel' : ''}`}
+      className={`odo-tooth ${selected ? 'sel' : ''} ${hasCond ? 'has-cond' : ''}`}
       onClick={() => onSelect(tooth)}
       title={`السن ${tooth} — ${label}`}
-      style={hasCond ? { outlineColor: color } : undefined}
     >
       <span className="odo-num">{tooth}</span>
-      <span className="odo-grid">
-        <i className="odo-region rg-b" style={{ background: region('B') }} title={SURFACE_LABEL.B} />
-        <i className="odo-region rg-m" style={{ background: region('M') }} title={SURFACE_LABEL.M} />
-        <i className="odo-region rg-o" style={{ background: region('O') }} title={SURFACE_LABEL.O}>
-          {hasCond && <span className="odo-center">{short}</span>}
-        </i>
-        <i className="odo-region rg-d" style={{ background: region('D') }} title={SURFACE_LABEL.D} />
-        <i className="odo-region rg-l" style={{ background: region('L') }} title={SURFACE_LABEL.L} />
-      </span>
+      <svg className="tooth-svg" viewBox="0 0 40 52" aria-hidden="true">
+        <defs>
+          <clipPath id={clipId}>
+            {'path' in shape ? (
+              <path d={shape.path} />
+            ) : (
+              <rect x={shape.x} y={3} width={shape.w} height={46} rx={11} />
+            )}
+          </clipPath>
+        </defs>
+        <g clipPath={`url(#${clipId})`}>
+          <rect x="0" y="0" width="40" height="16" fill={region('B')}>
+            <title>{SURFACE_LABEL.B}</title>
+          </rect>
+          <rect x="0" y="36" width="40" height="16" fill={region('L')}>
+            <title>{SURFACE_LABEL.L}</title>
+          </rect>
+          <rect x="0" y="16" width="20" height="20" fill={region('M')}>
+            <title>{SURFACE_LABEL.M}</title>
+          </rect>
+          <rect x="20" y="16" width="20" height="20" fill={region('D')}>
+            <title>{SURFACE_LABEL.D}</title>
+          </rect>
+          <ellipse cx="20" cy="26" rx="8" ry="8" fill={region('O')}>
+            <title>{SURFACE_LABEL.O}</title>
+          </ellipse>
+        </g>
+        {'path' in shape ? (
+          <path d={shape.path} fill="none" stroke={outline} strokeWidth="1.8" />
+        ) : (
+          <rect x={shape.x} y={3} width={shape.w} height={46} rx={11} fill="none" stroke={outline} strokeWidth="1.8" />
+        )}
+        {hasCond && (
+          <text x="20" y="30" textAnchor="middle" className="tooth-center-label">
+            {short}
+          </text>
+        )}
+      </svg>
       {hasCond && (cond === 'missing' || cond === 'extracted') && <span className="odo-x">✕</span>}
     </button>
   )
@@ -95,7 +139,7 @@ export default function Odontogram({
   attachments,
   onAttachmentsChanged
 }: {
-  patientId: number
+  patientId: string
   attachments: PatientAttachment[]
   onAttachmentsChanged: () => void
 }): React.JSX.Element {
@@ -184,7 +228,7 @@ export default function Odontogram({
   const linked = useMemo(() => attachments.filter((a) => a.tooth_number === selected), [attachments, selected])
   const unlinked = attachments.filter((a) => !a.tooth_number && (a.ftype === 'image' || a.ftype === 'dicom'))
 
-  const linkAttachment = (id: number): void => {
+  const linkAttachment = (id: string): void => {
     if (!selected || !id) return
     window.clinic.attachments
       .setTooth(id, selected)
@@ -195,7 +239,7 @@ export default function Odontogram({
       .catch((e) => toast(e.message, 'error'))
   }
 
-  const unlinkAttachment = (id: number): void => {
+  const unlinkAttachment = (id: string): void => {
     window.clinic.attachments
       .setTooth(id, '')
       .then(() => onAttachmentsChanged())
@@ -364,7 +408,7 @@ export default function Odontogram({
                 value=""
                 placeholder="ربط صورة موجودة..."
                 onChange={(v) => {
-                  if (v) linkAttachment(Number(v))
+                  if (v) linkAttachment(v)
                 }}
                 options={[{ value: '', label: 'ربط صورة موجودة...' }, ...unlinked.map((a) => ({ value: a.id, label: a.filename }))]}
               />

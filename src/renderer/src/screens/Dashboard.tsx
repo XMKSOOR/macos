@@ -9,7 +9,7 @@ export default function Dashboard({
   onOpenPatient
 }: {
   settings: Settings | null
-  onOpenPatient?: (id: number) => void
+  onOpenPatient?: (id: string) => void
 }): React.JSX.Element {
   const [period, setPeriod] = useState('7')
   const [stats, setStats] = useState<DashboardStats | null>(null)

@@ -7,6 +7,7 @@ import type { Material, Role, Settings, StockMovement } from '../lib'
 import { can, fmt } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 import { NumberInput } from '../NumberInput'
+import MaterialFile from './MaterialFile'
 
 const cols: Col<Material>[] = [
   { key: 'name', label: 'الاسم', width: 180 },
@@ -27,6 +28,9 @@ const cols: Col<Material>[] = [
   { key: 'notes', label: 'ملاحظات', width: 160 }
 ]
 
+/** تقريب بسيط إلى 4 منازل عشرية — يكفي دقة 0.001 للكمية ويمنع أخطاء الفاصلة العائمة */
+const round4 = (n: number): number => Math.round(n * 10000) / 10000
+
 export default function Inventory({ settings, role }: { settings: Settings | null; role: Role }): React.JSX.Element {
   const [list, setList] = useState<Material[]>([])
   const [movements, setMovements] = useState<StockMovement[]>([])
@@ -45,6 +49,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     notes: ''
   })
   const [deleting, setDeleting] = useState<Material | null>(null)
+  const [fileItem, setFileItem] = useState<Material | null>(null)
   const [adjusting, setAdjusting] = useState<Material | null>(null)
   const [adjQty, setAdjQty] = useState(0)
   const [adjNote, setAdjNote] = useState('')
@@ -87,14 +92,15 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
     setModal(true)
   }
 
-  /** عند تغيير الكمية: نحافظ على الإجمالي ونعيد حساب الكلفة = الاجمالي ÷ الكمية، أو نحسب الإجمالي = الكلفة × الكمية */
+  /** عند تغيير الكمية: نحافظ على الإجمالي ونعيد حساب الكلفة = الاجمالي ÷ الكمية، أو نحسب الإجمالي = الكلفة × الكمية.
+   *  تبقى الكلفة كسرية (بلا تقريب) حتى يبقى الإجمالي = الكلفة × الكمية صحيحاً تماماً حتى مع كميات كسّرية. */
   const setQuantity = (v: number): void => {
     setForm((f) => {
       const q = Number(v) || 0
       const t = Number(f.total) || 0
       const c = Number(f.cost) || 0
-      if (t > 0 && q > 0) return { ...f, quantity: q, cost: Math.round(t / q) }
-      if (c > 0) return { ...f, quantity: q, total: c * q }
+      if (t > 0 && q > 0) return { ...f, quantity: q, cost: round4(t / q) }
+      if (c > 0) return { ...f, quantity: q, total: round4(c * q) }
       return { ...f, quantity: q }
     })
   }
@@ -103,7 +109,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
   const setTotal = (lbp: number): void => {
     setForm((f) => {
       const q = Number(f.quantity) || 0
-      return { ...f, total: lbp || 0, cost: lbp > 0 && q > 0 ? Math.round(lbp / q) : f.cost }
+      return { ...f, total: lbp || 0, cost: lbp > 0 && q > 0 ? round4(lbp / q) : f.cost }
     })
   }
 
@@ -111,7 +117,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
   const setCost = (lbp: number): void => {
     setForm((f) => {
       const q = Number(f.quantity) || 0
-      return { ...f, cost: lbp || 0, total: lbp > 0 && q > 0 ? lbp * q : f.total }
+      return { ...f, cost: lbp || 0, total: lbp > 0 && q > 0 ? round4(lbp * q) : f.total }
     })
   }
 
@@ -126,7 +132,7 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
       name: form.name.trim(),
       cost: Number(form.cost) || 0,
       min_qty: Number(form.min_qty) || 0,
-      total: total > 0 ? total : (Number(form.cost) || 0) * (Number(form.quantity) || 0)
+      total: total > 0 ? total : round4((Number(form.cost) || 0) * (Number(form.quantity) || 0))
     }
     window.clinic.inventory
       .create(data)
@@ -152,16 +158,16 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      const row = list.find((m) => m.id === Number(key))
+      const row = list.find((m) => m.id === String(key))
       if (!row) return
       const targetQty = patch.quantity !== undefined ? Number(patch.quantity) : row.quantity
-      const effQty = targetQty > 0 ? targetQty : 1
       const cost = patch.cost !== undefined ? Number(patch.cost) : row.cost
       const next: Record<string, unknown> = { ...patch }
+      // الإجمالي = الكلفة × الكمية (بالكمية الفعلية، بلا تقريب) حتى لا يختلط الإجمالي مع الكلفة
       if (patch.total !== undefined) {
-        next.cost = Math.round(Number(patch.total) / effQty)
+        next.cost = targetQty > 0 ? round4(Number(patch.total) / targetQty) : 0
       } else if (patch.cost !== undefined || patch.quantity !== undefined) {
-        next.total = cost * effQty
+        next.total = round4(cost * targetQty)
       }
       await window.clinic.inventory.update(row.id, next)
       const delta = targetQty - row.quantity
@@ -174,17 +180,16 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
   )
 
   /** حساب حيّ داخل الجدول: الاجمالي = الكلفة × الكمية، وبالعكس الكلفة = الاجمالي ÷ الكمية.
-   *  إذا كانت الكمية 0 أو أقل تُعامَل كـ 1 حتى لا يصبح الاجمالي صفراً ولا يفشل القسمة. */
+   *  الكمية الكسرية (حتى 0.001) مدعومة والكلفة تبقى غير مقرّبة حتى يبقى المتساوي صحيحاً. */
   const deriveDraft = useCallback((d: Record<string, string>, key: string): Record<string, string> => {
-    const qRaw = Number(d.quantity) || 0
-    const q = qRaw > 0 ? qRaw : 1
+    const q = Number(d.quantity) || 0
     if (key === 'quantity' || key === 'cost') {
       const c = Number(d.cost) || 0
-      return { ...d, total: String(Math.round(c * q)) }
+      return { ...d, total: String(q > 0 ? round4(c * q) : 0) }
     }
     if (key === 'total') {
       const t = Number(d.total) || 0
-      return { ...d, cost: String(Math.round(t / q)) }
+      return { ...d, cost: String(q > 0 ? round4(t / q) : 0) }
     }
     return d
   }, [])
@@ -245,6 +250,19 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
 
   return (
     <div>
+      {fileItem ? (
+        <MaterialFile
+          material={fileItem}
+          settings={settings}
+          role={role}
+          onClose={() => setFileItem(null)}
+          onSaved={() => {
+            load(search)
+            loadMovements()
+          }}
+        />
+      ) : (
+      <>
       <div className="toolbar" style={{ marginBottom: 14 }}>
         <button className={tab === 'items' ? 'soft' : 'ghost'} onClick={() => setTab('items')}>
           المواد والأصناف
@@ -294,6 +312,9 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
               emptyText="لا توجد مواد"
               actions={(m) => (
                 <>
+                  <button className="soft small" onClick={() => setFileItem(m)}>
+                    تعديل
+                  </button>
                   {canAdjust && (
                     <button
                       className="soft small"
@@ -474,6 +495,8 @@ export default function Inventory({ settings, role }: { settings: Settings | nul
           onConfirm={remove}
           onClose={() => setDeleting(null)}
         />
+      )}
+      </>
       )}
     </div>
   )

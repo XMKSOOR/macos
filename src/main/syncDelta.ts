@@ -255,36 +255,12 @@ export function mergeIntoLocal(
       const rows = db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
       saveBaseline(transport, t, rows)
     }
-    bumpSequences(db, insertOrder)
     db.exec('COMMIT')
   } catch (e) {
     db.exec('ROLLBACK')
     throw e
   }
   return counts
-}
-
-/**
- * يقدّم عدّاد المعرّفات المحلي (sqlite_sequence) لكل جدول إلى أكبر معرّف موجود —
- * بعد دمج صفوف السحابة — حتى لا يولّد السطح المكتب معرّفاً يتصادم مع صفٍّ جديد
- * أنشأه الجوال على Postgres (وهذا كان أصل «اختفاء التعديلات»).
- */
-function bumpSequences(db: ReturnType<typeof getDb>, tables: string[]): void {
-  for (const t of tables) {
-    try {
-      const row = db.prepare(`SELECT MAX(\`id\`) AS m FROM \`${t}\``).get() as { m?: number } | undefined
-      const max = Number(row?.m ?? 0)
-      if (!max) continue
-      const seq = db.prepare('SELECT seq FROM sqlite_sequence WHERE name=?').get(t) as { seq?: number } | undefined
-      if (seq) {
-        if (Number(seq.seq ?? 0) < max) db.prepare('UPDATE sqlite_sequence SET seq=? WHERE name=?').run(max, t)
-      } else if (t !== 'settings') {
-        db.prepare('INSERT INTO sqlite_sequence(name, seq) VALUES (?,?)').run(t, max)
-      }
-    } catch {
-      /* الجداول بلا AUTOINCREMENT لا تملك sqlite_sequence — نتجاهلها */
-    }
-  }
 }
 
 function normalizeValue(v: unknown): string | number | null {

@@ -34,7 +34,7 @@ export default function Patients({
 }: {
   settings: Settings | null
   role: Role
-  fileId?: number | null
+  fileId?: string | null
   onCloseFile?: () => void
 }): React.JSX.Element {
   const [list, setList] = useState<Patient[]>([])
@@ -42,7 +42,7 @@ export default function Patients({
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(empty)
   const [deleting, setDeleting] = useState<Patient | null>(null)
-  const [fileOf, setFileOf] = useState<number | null>(null)
+  const [fileOf, setFileOf] = useState<string | null>(null)
   const toast = useToast()
 
   const canEdit = can(role, 'edit')
@@ -100,7 +100,7 @@ export default function Patients({
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      await window.clinic.patients.update(Number(key), patch)
+      await window.clinic.patients.update(String(key), patch)
       load(search)
     },
     [load, search]
@@ -124,6 +124,19 @@ export default function Patients({
       address: p.address,
       notes: p.notes
     }))
+
+  if (activeFile !== null) {
+    return (
+      <PatientFile
+        id={activeFile}
+        rate={settings?.usd_rate ?? 130}
+        onClose={() => {
+          setFileOf(null)
+          onCloseFile?.()
+        }}
+      />
+    )
+  }
 
   return (
     <div>
@@ -220,17 +233,6 @@ export default function Patients({
             </Field>
           </div>
         </Modal>
-      )}
-
-      {activeFile !== null && (
-        <PatientFile
-          id={activeFile}
-          rate={settings?.usd_rate ?? 130}
-          onClose={() => {
-            setFileOf(null)
-            onCloseFile?.()
-          }}
-        />
       )}
 
       {deleting && (

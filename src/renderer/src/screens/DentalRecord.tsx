@@ -131,7 +131,7 @@ const REFERRAL_COLS: RecCol[] = [
 
 const RECALL_LABEL: Record<RecallType, string> = { checkup: 'فحص دوري', cleaning: 'تنظيف', followup: 'متابعة' }
 
-function PerioTab({ patientId }: { patientId: number }): React.JSX.Element {
+function PerioTab({ patientId }: { patientId: string }): React.JSX.Element {
   const toast = useToast()
   const [rows, setRows] = useState<PeriodontalChartEntry[]>([])
   useEffect(() => {
@@ -178,7 +178,7 @@ function XrayTab({
 }): React.JSX.Element {
   const toast = useToast()
   const rows = attachments.filter((a) => a.ftype === 'image' || a.ftype === 'dicom')
-  const setTooth = (id: number, tooth: string): void => {
+  const setTooth = (id: string, tooth: string): void => {
     window.clinic.attachments
       .setTooth(id, tooth)
       .then(() => {
@@ -216,7 +216,7 @@ function XrayTab({
   )
 }
 
-function XrayThumb({ id }: { id: number }): React.JSX.Element {
+function XrayThumb({ id }: { id: string }): React.JSX.Element {
   const [url, setUrl] = useState('')
   useEffect(() => {
     let alive = true
@@ -233,7 +233,7 @@ function XrayThumb({ id }: { id: number }): React.JSX.Element {
   return url ? <img src={url} alt="" /> : <span>…</span>
 }
 
-function RecallTab({ patientId }: { patientId: number }): React.JSX.Element {
+function RecallTab({ patientId }: { patientId: string }): React.JSX.Element {
   const toast = useToast()
   const [rows, setRows] = useState<RecallReminder[]>([])
   const [open, setOpen] = useState(false)
@@ -423,7 +423,7 @@ export default function DentalRecord({
   attachments,
   onAttachmentsChanged
 }: {
-  patientId: number
+  patientId: string
   patientName: string
   rate: number
   attachments: PatientAttachment[]

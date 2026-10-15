@@ -99,7 +99,7 @@ function RecallCenter(): React.JSX.Element {
         <tbody>
           {rows.map((r) => (
             <tr key={r.id}>
-              <td>{r.patient_name ?? r.patient_id}</td>
+              <td>{r.patient_name ?? '—'}</td>
               <td>{RECALL_LABEL[r.recall_type] ?? r.recall_type}</td>
               <td>{r.due_date}</td>
               <td>{r.notes || '—'}</td>

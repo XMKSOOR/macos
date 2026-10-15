@@ -8,6 +8,7 @@ import type { DueRecurringExpense, Expense, Material, Recurrence, Role, Settings
 import { can, today } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 import { NumberInput } from '../NumberInput'
+import ExpenseFile from './ExpenseFile'
 
 const CATEGORIES = ['رواتب وأجور', 'إيجار', 'كهرباء ومحروقات', 'أجهزة ومعدات', 'نظافة وتعقيم', 'أدوية ومواد', 'صيانة', 'أخرى']
 
@@ -71,9 +72,10 @@ export default function Expenses({ settings, role }: { settings: Settings | null
     next_due: ''
   })
   const [deleting, setDeleting] = useState<Expense | null>(null)
+  const [fileItem, setFileItem] = useState<Expense | null>(null)
   const [due, setDue] = useState<DueRecurringExpense[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
-  const [materialId, setMaterialId] = useState(0)
+  const [materialId, setMaterialId] = useState('')
   const [units, setUnits] = useState('')
   const [addingItem, setAddingItem] = useState(false)
   const [newName, setNewName] = useState('')
@@ -135,7 +137,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
       load(from, to)
       window.clinic.expenses.due(7).then(setDue).catch(() => {})
     }
-    if (materialId !== 0) {
+    if (materialId !== '') {
       const qty = Number(units)
       if (!qty || qty <= 0) {
         toast('أدخل عدد الوحدات (حبات/عبوات)', 'error')
@@ -212,7 +214,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      await window.clinic.expenses.update(Number(key), patch)
+      await window.clinic.expenses.update(String(key), patch)
       load(from, to)
     },
     [load, from, to]
@@ -220,27 +222,10 @@ export default function Expenses({ settings, role }: { settings: Settings | null
 
   const onImportRows = useCallback(
     async (rows: Record<string, string>[]) => {
-      let ok = 0
-      let skip = 0
-      for (const r of rows) {
-        if (!r.category || !Number(r.amount)) {
-          skip++
-          continue
-        }
-        try {
-          await window.clinic.expenses.create({
-            category: r.category,
-            amount: Math.round(Number(r.amount)),
-            note: r.note ?? '',
-            date: r.date || today()
-          })
-          ok++
-        } catch {
-          skip++
-        }
-      }
+      // الاستيراد يتم على الخادم مع دمج التكرار (التاريخ + التصنيف + المبلغ + الصنف)، لا ينشئ صفوفاً مكرّرة
+      const res = await window.clinic.expenses.importRows(rows)
       load(from, to)
-      return { ok, skip }
+      return res
     },
     [load, from, to]
   )
@@ -257,6 +242,19 @@ export default function Expenses({ settings, role }: { settings: Settings | null
 
   return (
     <div>
+      {fileItem ? (
+        <ExpenseFile
+          expense={fileItem}
+          settings={settings}
+          role={role}
+          onClose={() => setFileItem(null)}
+          onSaved={() => {
+            load(from, to)
+            window.clinic.expenses.due(7).then(setDue).catch(() => {})
+          }}
+        />
+      ) : (
+      <>
       {due.length > 0 && (
         <div className="panel" style={{ marginBottom: 16, borderRight: '3px solid var(--warn)' }}>
           <div className="panel-head">
@@ -324,7 +322,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                   recurrence: 'monthly',
                   next_due: ''
                 })
-                setMaterialId(0)
+                setMaterialId('')
                 setUnits('')
                 setAddingItem(false)
                 setNewName('')
@@ -362,15 +360,18 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 .catch((e) => toast(e instanceof Error ? e.message : String(e), 'error'))
             }}
             emptyText="لا توجد مصاريف"
-            actions={(e) =>
-              canDelete ? (
-                <button className="danger-ghost small" onClick={() => setDeleting(e)}>
-                  حذف
+            actions={(e) => (
+              <>
+                <button className="soft small" onClick={() => setFileItem(e)}>
+                  تعديل
                 </button>
-              ) : (
-                <span />
-              )
-            }
+                {canDelete && (
+                  <button className="danger-ghost small" onClick={() => setDeleting(e)}>
+                    حذف
+                  </button>
+                )}
+              </>
+            )}
           />
           {list.length > 0 && (
             <div className="flex between mt-16" style={{ fontWeight: 800 }}>
@@ -421,14 +422,14 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 <div style={{ flex: 1 }}>
                   <SearchSelect
                     value={materialId}
-                    onChange={(v) => setMaterialId(Number(v))}
+                    onChange={(v) => setMaterialId(v)}
                     options={[
-                      { value: 0, label: '— لا شيء (مصروف عادي) —' },
+                      { value: '', label: '— لا شيء (مصروف عادي) —' },
                       ...Array.from(
                         new Map(
                           materials
                             .slice()
-                            .sort((a, b) => (b.id ?? 0) - (a.id ?? 0))
+                            .sort((a, b) => String(b.id ?? '').localeCompare(String(a.id ?? '')))
                             .map((m) => [m.name, m])
                         ).values()
                       )
@@ -473,7 +474,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 </button>
               </div>
             )}
-            {materialId !== 0 && (
+            {materialId !== '' && (
               <>
                 <Field label="عدد الوحدات المشتراة (حبات/عبوات) *">
                   <NumberInput value={Number(units) || 0} onChange={(v) => setUnits(String(v))} />
@@ -492,7 +493,7 @@ export default function Expenses({ settings, role }: { settings: Settings | null
                 </div>
               </>
             )}
-            {materialId === 0 && (
+            {materialId === '' && (
               <>
                 <Field label="مصروف متكرر">
                   <label className="inline-check">
@@ -539,6 +540,8 @@ export default function Expenses({ settings, role }: { settings: Settings | null
           onConfirm={remove}
           onClose={() => setDeleting(null)}
         />
+      )}
+      </>
       )}
     </div>
   )

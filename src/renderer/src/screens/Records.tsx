@@ -56,7 +56,7 @@ export function RecordsTab({
   emptyText = 'لا توجد بيانات'
 }: {
   kind: string
-  patientId?: number
+  patientId?: string
   columns: RecCol[]
   emptyText?: string
 }): React.JSX.Element {
@@ -111,7 +111,7 @@ export function RecordsTab({
   const remove = (): void => {
     if (!deleting) return
     window.clinic.records
-      .delete(kind, Number(deleting.id))
+      .delete(kind, String(deleting.id))
       .then(() => {
         toast('تم الحذف', 'success')
         setDeleting(null)

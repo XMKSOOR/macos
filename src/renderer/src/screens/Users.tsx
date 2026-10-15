@@ -166,9 +166,9 @@ export default function UsersScreen({ currentUser, onSaved }: { currentUser: Use
                     </td>
                   </tr>
                 ) : (
-                  list.map((u) => (
+                  list.map((u, i) => (
                     <tr key={u.id}>
-                      <td>{u.id}</td>
+                      <td>{i + 1}</td>
                       <td style={{ fontWeight: 600 }}>{u.username}</td>
                       <td>{u.full_name || '—'}</td>
                       <td>

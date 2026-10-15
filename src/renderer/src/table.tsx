@@ -479,7 +479,7 @@ export default function DataGrid<T>({
                 </th>
               )}
               <th className="id-col" style={{ width: 56 }}>
-                ID
+                #
               </th>
               {cols.map((c) => (
                 <th key={c.key} style={c.width ? { width: c.width } : undefined}>
@@ -497,7 +497,7 @@ export default function DataGrid<T>({
                 </td>
               </tr>
             ) : (
-              rows.map((row) => {
+              rows.map((row, i) => {
                 const editing = editKey === rowKey(row)
                 const handleDoubleClick = (row: T): void => {
                   if (onRowDoubleClick) onRowDoubleClick(row)
@@ -524,7 +524,7 @@ export default function DataGrid<T>({
                         />
                       </td>
                     )}
-                    <td className="id-col">{keyOf(row)}</td>
+                    <td className="id-col">{i + 1}</td>
                     {cols.map((c) => (
                       <td key={c.key}>
                         {editing && editableKeys.includes(c.key) ? (

@@ -5,14 +5,15 @@ import ExcelBar from '../excel'
 import type { CatalogItem, Invoice, Material, Patient, Role, Settings } from '../lib'
 import { can, fmt, today, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
+import InvoiceFile from './InvoiceFile'
 
 interface Line {
   key: number
   name: string
   cost: number
   qty: number
-  catalog_id: number | null
-  materials: { material_id: number; qty: number }[]
+  catalog_id: string | null
+  materials: { material_id: string; qty: number }[]
 }
 
 let lineKey = 1
@@ -24,18 +25,16 @@ export default function Billing({
 }: {
   settings: Settings | null
   role: Role
-  onOpenPatient?: (id: number) => void
+  onOpenPatient?: (id: string) => void
 }): React.JSX.Element {
   const [list, setList] = useState<Invoice[]>([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showEditor, setShowEditor] = useState(false)
-  const [detail, setDetail] = useState<Invoice | null>(null)
-  const [detailFull, setDetailFull] = useState<Invoice | null>(null)
+  const [fileId, setFileId] = useState<string | null>(null)
   const [paying, setPaying] = useState<Invoice | null>(null)
   const [payAmount, setPayAmount] = useState(0)
   const [deleting, setDeleting] = useState<Invoice | null>(null)
-  const [printBusy, setPrintBusy] = useState(false)
   const toast = useToast()
   const rate = settings?.usd_rate ?? 130
   const canDelete = can(role, 'delete')
@@ -57,10 +56,6 @@ export default function Billing({
     load(search, statusFilter)
   }, [load, search, statusFilter])
 
-  const loadDetail = useCallback((id: number) => {
-    window.clinic.invoices.get(id).then(setDetailFull).catch(() => {})
-  }, [])
-
   const submitPay = (): void => {
     if (!paying) return
     if (payAmount <= 0) {
@@ -74,26 +69,12 @@ export default function Billing({
     }
     window.clinic.invoices
       .pay(paying.id, payAmount)
-      .then((inv) => {
+      .then(() => {
         toast('تم تسجيل الدفعة', 'success')
         setPaying(null)
         load(search, statusFilter)
-        setDetail(inv)
       })
       .catch((e) => toast(e.message, 'error'))
-  }
-
-  const print = (): void => {
-    if (!detail) return
-    setPrintBusy(true)
-    window.clinic.printing
-      .receipt(detail.id)
-      .then((res) => {
-        const r = res as { ok: boolean; error?: string }
-        toast(r.ok ? 'تم الإرسال للطابعة' : `فشلت الطباعة: ${r.error ?? ''}`, r.ok ? 'success' : 'error')
-      })
-      .catch((e) => toast(e.message, 'error'))
-      .finally(() => setPrintBusy(false))
   }
 
   const remove = (): void => {
@@ -106,6 +87,19 @@ export default function Billing({
       })
       .catch((e) => toast(e.message, 'error'))
     setDeleting(null)
+  }
+
+  if (fileId !== null) {
+    return (
+      <InvoiceFile
+        id={fileId}
+        defaultRate={rate}
+        role={role}
+        onClose={() => setFileId(null)}
+        onOpenPatient={onOpenPatient}
+        onChanged={() => load(search, statusFilter)}
+      />
+    )
   }
 
   return (
@@ -150,7 +144,7 @@ export default function Billing({
             <table className="data">
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>#</th>
                   <th>الرقم</th>
                   <th>المريض</th>
                   <th>التاريخ</th>
@@ -169,11 +163,11 @@ export default function Billing({
                     </td>
                   </tr>
                 ) : (
-                  list.map((inv) => {
+                  list.map((inv, i) => {
                     const remaining = inv.total - inv.paid
                     return (
                       <tr key={inv.id}>
-                        <td className="id-col">{inv.id}</td>
+                        <td className="id-col">{i + 1}</td>
                         <td style={{ fontWeight: 700 }}>#{inv.invoice_no}</td>
                         <td>
                           {inv.patient_id && onOpenPatient ? (
@@ -201,12 +195,9 @@ export default function Billing({
                           <div className="row-actions">
                             <button
                               className="soft small"
-                              onClick={() => {
-                                setDetail(inv)
-                                loadDetail(inv.id)
-                              }}
+                              onClick={() => setFileId(inv.id)}
                             >
-                              عرض
+                              فتح
                             </button>
                             <button
                               className="ghost small"
@@ -239,43 +230,11 @@ export default function Billing({
         <InvoiceEditor
           defaultRate={rate}
           onClose={() => setShowEditor(false)}
-          onSaved={(inv) => {
+          onSaved={() => {
             setShowEditor(false)
-            setDetail(inv)
-            loadDetail(inv.id)
             load(search, statusFilter)
           }}
         />
-      )}
-
-      {detail && (
-        <Modal
-          title={`فاتورة #${detail.invoice_no}`}
-          onClose={() => setDetail(null)}
-          wide
-          footer={
-            <>
-              <button onClick={print} disabled={printBusy}>
-                🖨 {printBusy ? 'جاري الطباعة...' : 'طباعة الإيصال'}
-              </button>
-              <button
-                className="ghost"
-                onClick={() => {
-                  setPaying(detail)
-                  setPayAmount(detail.total - detail.paid)
-                }}
-                disabled={detail.status === 'paid'}
-              >
-                تسجيل دفعة
-              </button>
-              <button className="danger-ghost" onClick={() => setDetail(null)}>
-                إغلاق
-              </button>
-            </>
-          }
-        >
-          <DetailBody invoice={detailFull ?? detail} rate={detail.usd_rate || rate} />
-        </Modal>
       )}
 
       {paying && <PayModal invoice={paying} amount={payAmount} setAmount={setPayAmount} onSave={submitPay} onClose={() => setPaying(null)} />}
@@ -288,107 +247,6 @@ export default function Billing({
           onClose={() => setDeleting(null)}
         />
       )}
-    </div>
-  )
-}
-
-function DetailBody({ invoice, rate }: { invoice: Invoice; rate: number }): React.JSX.Element {
-  const remaining = invoice.total - invoice.paid
-  return (
-    <div>
-      <div className="form-grid" style={{ marginBottom: 14 }}>
-        <div>
-          <div className="muted">المريض</div>
-          <div style={{ fontWeight: 700 }}>{invoice.patient_name}</div>
-          <div className="muted" style={{ fontSize: 12 }}>{invoice.patient_phone}</div>
-        </div>
-        <div>
-          <div className="muted">التاريخ</div>
-          <div>{invoice.date}</div>
-        </div>
-        <div>
-          <div className="muted">سعر الصرف</div>
-          <div>{invoice.usd_rate} ل.س/$</div>
-        </div>
-        <div>
-          <div className="muted">أجرها</div>
-          <div>{invoice.created_by}</div>
-        </div>
-      </div>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>البيان</th>
-              <th>الكمية</th>
-              <th>السعر</th>
-              <th>المجموع</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(invoice.items ?? []).map((it) => (
-              <tr key={it.id}>
-                <td>
-                  {it.name}
-                  {it.materials.length > 0 && (
-                    <div className="muted" style={{ fontSize: 11 }}>
-                      المستهلك: {it.materials.map((m) => `#${m.material_id} ×${m.qty}`).join('، ')}
-                    </div>
-                  )}
-                </td>
-                <td>{it.qty}</td>
-                <td>{fmt(it.cost)}</td>
-                <td>
-                  <CurrencyCell lbp={it.cost * it.qty} rate={rate} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colSpan={3} style={{ fontWeight: 700 }}>
-                المجموع قبل الخصم
-              </td>
-              <td>
-                <CurrencyCell lbp={invoice.subtotal} rate={rate} />
-              </td>
-            </tr>
-            <tr>
-              <td colSpan={3} style={{ fontWeight: 700 }}>
-                الخصم
-              </td>
-              <td>
-                <CurrencyCell lbp={invoice.discount} rate={rate} />
-              </td>
-            </tr>
-            <tr>
-              <td colSpan={3} style={{ fontWeight: 800 }}>
-                الإجمالي
-              </td>
-              <td style={{ fontWeight: 800 }}>
-                <CurrencyCell lbp={invoice.total} rate={rate} />
-              </td>
-            </tr>
-            <tr>
-              <td colSpan={3} style={{ fontWeight: 700, color: 'var(--success)' }}>
-                المدفوع
-              </td>
-              <td>
-                <CurrencyCell lbp={invoice.paid} rate={rate} />
-              </td>
-            </tr>
-            <tr>
-              <td colSpan={3} style={{ fontWeight: 700, color: 'var(--danger)' }}>
-                المتبقي
-              </td>
-              <td>
-                <CurrencyCell lbp={remaining} rate={rate} />
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-      {invoice.notes && <p className="muted mt-8">{invoice.notes}</p>}
     </div>
   )
 }
@@ -467,7 +325,7 @@ function InvoiceEditor({
   const [patients, setPatients] = useState<Patient[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
-  const [patientId, setPatientId] = useState(0)
+  const [patientId, setPatientId] = useState('')
   const [date, setDate] = useState(today())
   const [usdRate, setUsdRate] = useState(defaultRate)
   const [discount, setDiscount] = useState(0)
@@ -487,7 +345,7 @@ function InvoiceEditor({
   }, [])
 
   const addCatalog = useCallback(
-    (catalogId: number) => {
+    (catalogId: string) => {
       const item = catalog.find((c) => c.id === catalogId)
       if (!item) return
       setLines((ls) => [
@@ -582,9 +440,9 @@ function InvoiceEditor({
         <Field label="المريض *">
           <SearchSelect
             value={patientId}
-            onChange={(v) => setPatientId(Number(v))}
+            onChange={(v) => setPatientId(v)}
             options={[
-              { value: 0, label: 'اختر المريض...' },
+              { value: '', label: 'اختر المريض...' },
               ...patients.map((p) => ({ value: p.id, label: `${p.name}${p.phone ? ` (${p.phone})` : ''}` }))
             ]}
           />
@@ -605,7 +463,7 @@ function InvoiceEditor({
           value=""
           placeholder="+ إضافة من الكتالوج..."
           onChange={(v) => {
-            if (v) addCatalog(Number(v))
+            if (v) addCatalog(v)
           }}
           options={[
             { value: '', label: '+ إضافة من الكتالوج...' },
@@ -680,12 +538,12 @@ function MaterialPicker({
   onDone
 }: {
   materials: Material[]
-  current: { material_id: number; qty: number }[]
-  onDone: (mats: { material_id: number; qty: number }[]) => void
+  current: { material_id: string; qty: number }[]
+  onDone: (mats: { material_id: string; qty: number }[]) => void
 }): React.JSX.Element {
-  const [sel, setSel] = useState<{ material_id: number; qty: number }[]>(current)
-  const [pick, setPick] = useState(0)
+  const [pick, setPick] = useState('')
   const [qty, setQty] = useState(1)
+  const [sel, setSel] = useState<{ material_id: string; qty: number }[]>(current)
 
   const matTotal = useMemo(
     () =>
@@ -703,11 +561,11 @@ function MaterialPicker({
       if (existing) return s.map((x) => (x.material_id === pick ? { ...x, qty: x.qty + qty } : x))
       return [...s, { material_id: pick, qty }]
     })
-    setPick(0)
+    setPick('')
     setQty(1)
   }
 
-  const remove = (id: number): void => setSel((s) => s.filter((x) => x.material_id !== id))
+  const remove = (id: string): void => setSel((s) => s.filter((x) => x.material_id !== id))
 
   return (
     <div className="modal-backdrop">
@@ -719,9 +577,9 @@ function MaterialPicker({
           <div className="toolbar" style={{ marginBottom: 10 }}>
             <SearchSelect
               value={pick}
-              onChange={(v) => setPick(Number(v))}
+              onChange={(v) => setPick(v)}
               options={[
-                { value: 0, label: 'اختر المادة...' },
+                { value: '', label: 'اختر المادة...' },
                 ...materials.map((m) => ({ value: m.id, label: `${m.name} — ${fmt(m.cost)} ل.س (متوفر ${m.quantity})` }))
               ]}
             />
@@ -746,7 +604,7 @@ function MaterialPicker({
                   const m = materials.find((x) => x.id === s.material_id)
                   return (
                     <tr key={s.material_id}>
-                      <td>{m?.name ?? `#${s.material_id}`}</td>
+                      <td>{m?.name ?? 'صنف محذوف'}</td>
                       <td>{m ? fmt(m.cost) : '—'}</td>
                       <td>{s.qty}</td>
                       <td>{m ? fmt(m.cost * s.qty) : '—'}</td>

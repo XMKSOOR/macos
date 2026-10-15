@@ -54,58 +54,60 @@ const api = {
   users: {
     list: (): Promise<User[]> => invoke('users:list'),
     create: (u: object): Promise<User> => invoke('users:create', u),
-    update: (id: number, data: object): Promise<boolean> => invoke('users:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('users:delete', { id })
+    update: (id: string, data: object): Promise<boolean> => invoke('users:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('users:delete', { id })
   },
   patients: {
     list: (search?: string): Promise<Patient[]> => invoke('patients:list', { search }),
-    get: (id: number): Promise<PatientFileResult> => invoke('patients:get', { id }),
+    get: (id: string): Promise<PatientFileResult> => invoke('patients:get', { id }),
     create: (p: object): Promise<Patient> => invoke('patients:create', p),
-    update: (id: number, data: object): Promise<boolean> => invoke('patients:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('patients:delete', { id }),
+    update: (id: string, data: object): Promise<boolean> => invoke('patients:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('patients:delete', { id }),
     importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
       invoke('patients:import', { rows })
   },
   attachments: {
-    list: (patientId: number): Promise<PatientAttachment[]> => invoke('attachments:list', { patientId }),
-    add: (patientId: number): Promise<PatientAttachment[]> => invoke('attachments:add', { patientId }),
-    read: (id: number): Promise<{ attachment: PatientAttachment; dataUrl: string }> =>
+    list: (patientId: string): Promise<PatientAttachment[]> => invoke('attachments:list', { patientId }),
+    add: (patientId: string): Promise<PatientAttachment[]> => invoke('attachments:add', { patientId }),
+    read: (id: string): Promise<{ attachment: PatientAttachment; dataUrl: string }> =>
       invoke('attachments:read', { id }),
-    delete: (id: number): Promise<boolean> => invoke('attachments:delete', { id }),
-    openExternal: (id: number): Promise<boolean> => invoke('attachments:openExternal', { id }),
-    setTooth: (id: number, toothNumber: string): Promise<boolean> => invoke('attachments:setTooth', { id, toothNumber })
+    delete: (id: string): Promise<boolean> => invoke('attachments:delete', { id }),
+    openExternal: (id: string): Promise<boolean> => invoke('attachments:openExternal', { id }),
+    setTooth: (id: string, toothNumber: string): Promise<boolean> => invoke('attachments:setTooth', { id, toothNumber })
   },
   medications: {
-    list: (patientId: number): Promise<Medication[]> => invoke('medications:list', { patientId }),
-    save: (m: MedicationInput & { id?: number }): Promise<Medication> => invoke('medications:save', m),
-    delete: (id: number): Promise<boolean> => invoke('medications:delete', { id })
+    list: (patientId: string): Promise<Medication[]> => invoke('medications:list', { patientId }),
+    save: (m: MedicationInput & { id?: string }): Promise<Medication> => invoke('medications:save', m),
+    delete: (id: string): Promise<boolean> => invoke('medications:delete', { id })
   },
   medCatalog: {
     list: (): Promise<Medicine[]> => invoke('medCatalog:list'),
     create: (m: MedicineInput): Promise<Medicine> => invoke('medCatalog:create', m),
-    update: (id: number, data: MedicineInput): Promise<Medicine> => invoke('medCatalog:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('medCatalog:delete', { id })
+    update: (id: string, data: MedicineInput): Promise<Medicine> => invoke('medCatalog:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('medCatalog:delete', { id })
   },
   appointments: {
     list: (filter?: object): Promise<Appointment[]> => invoke('appointments:list', filter ?? {}),
     create: (a: object): Promise<Appointment> => invoke('appointments:create', a),
-    update: (id: number, data: object): Promise<boolean> => invoke('appointments:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('appointments:delete', { id })
+    update: (id: string, data: object): Promise<boolean> => invoke('appointments:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('appointments:delete', { id }),
+    importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
+      invoke('appointments:import', { rows })
   },
   catalog: {
     list: (): Promise<CatalogItem[]> => invoke('catalog:list'),
     create: (c: object): Promise<CatalogItem> => invoke('catalog:create', c),
-    update: (id: number, data: object): Promise<boolean> => invoke('catalog:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('catalog:delete', { id }),
+    update: (id: string, data: object): Promise<boolean> => invoke('catalog:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('catalog:delete', { id }),
     importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
       invoke('catalog:importRows', { rows })
   },
   inventory: {
     list: (search?: string): Promise<Material[]> => invoke('inventory:list', { search }),
     create: (m: object): Promise<Material> => invoke('inventory:create', m),
-    update: (id: number, data: object): Promise<boolean> => invoke('inventory:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('inventory:delete', { id }),
-    adjust: (id: number, qtyDelta: number, operation: string, note: string): Promise<boolean> =>
+    update: (id: string, data: object): Promise<boolean> => invoke('inventory:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('inventory:delete', { id }),
+    adjust: (id: string, qtyDelta: number, operation: string, note: string): Promise<boolean> =>
       invoke('inventory:adjust', { id, qtyDelta, operation, note }),
     movements: (): Promise<StockMovement[]> => invoke('inventory:movements'),
     importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
@@ -115,73 +117,75 @@ const api = {
     nextNo: (): Promise<string> => invoke('invoices:nextNo'),
     list: (search?: string): Promise<Invoice[]> => invoke('invoices:list', { search }),
     since: (since: string): Promise<Invoice[]> => invoke('invoices:since', { since }),
-    get: (id: number): Promise<Invoice> => invoke('invoices:get', { id }),
+    get: (id: string): Promise<Invoice> => invoke('invoices:get', { id }),
     create: (input: object): Promise<Invoice> => invoke('invoices:create', input),
-    pay: (id: number, amount: number): Promise<Invoice> => invoke('invoices:pay', { id, amount }),
-    delete: (id: number): Promise<boolean> => invoke('invoices:delete', { id })
+    pay: (id: string, amount: number): Promise<Invoice> => invoke('invoices:pay', { id, amount }),
+    delete: (id: string): Promise<boolean> => invoke('invoices:delete', { id })
   },
   expenses: {
     list: (filter?: object): Promise<Expense[]> => invoke('expenses:list', filter ?? {}),
     create: (e: object): Promise<Expense> => invoke('expenses:create', e),
     purchase: (e: object): Promise<Expense> => invoke('expenses:purchase', e),
-    update: (id: number, data: object): Promise<boolean> => invoke('expenses:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('expenses:delete', { id }),
+    update: (id: string, data: object): Promise<boolean> => invoke('expenses:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('expenses:delete', { id }),
     due: (withinDays?: number): Promise<DueRecurringExpense[]> => invoke('expenses:due', { withinDays }),
-    runDue: (): Promise<number> => invoke('expenses:runDue')
+    runDue: (): Promise<number> => invoke('expenses:runDue'),
+    importRows: (rows: Record<string, string>[]): Promise<{ ok: number; updated: number; skip: number }> =>
+      invoke('expenses:importRows', { rows })
   },
   dashboard: {
     stats: (period: string): Promise<DashboardStats> => invoke('dashboard:stats', { period })
   },
   dental: {
-    listChart: (patientId: number): Promise<DentalChartEntry[]> => invoke('dental:listChart', { patientId }),
-    saveTooth: (patientId: number, toothNumber: string, condition: ToothCondition, surfaces: string, notes: string): Promise<void> =>
+    listChart: (patientId: string): Promise<DentalChartEntry[]> => invoke('dental:listChart', { patientId }),
+    saveTooth: (patientId: string, toothNumber: string, condition: ToothCondition, surfaces: string, notes: string): Promise<void> =>
       invoke('dental:saveTooth', { patientId, toothNumber, condition, surfaces, notes }),
-    deleteTooth: (patientId: number, toothNumber: string): Promise<void> => invoke('dental:deleteTooth', { patientId, toothNumber })
+    deleteTooth: (patientId: string, toothNumber: string): Promise<void> => invoke('dental:deleteTooth', { patientId, toothNumber })
   },
   plans: {
-    list: (patientId: number): Promise<TreatmentPlan[]> => invoke('plans:list', { patientId }),
-    create: (patientId: number, title: string, notes: string): Promise<TreatmentPlan> => invoke('plans:create', { patientId, title, notes }),
-    update: (id: number, title: string, status: TreatmentPlanStatus, notes: string): Promise<boolean> =>
+    list: (patientId: string): Promise<TreatmentPlan[]> => invoke('plans:list', { patientId }),
+    create: (patientId: string, title: string, notes: string): Promise<TreatmentPlan> => invoke('plans:create', { patientId, title, notes }),
+    update: (id: string, title: string, status: TreatmentPlanStatus, notes: string): Promise<boolean> =>
       invoke('plans:update', { id, title, status, notes }),
-    delete: (id: number): Promise<boolean> => invoke('plans:delete', { id }),
-    addItem: (planId: number, toothNumber: string, procedureName: string, cost: number, notes: string): Promise<void> =>
+    delete: (id: string): Promise<boolean> => invoke('plans:delete', { id }),
+    addItem: (planId: string, toothNumber: string, procedureName: string, cost: number, notes: string): Promise<void> =>
       invoke('plans:addItem', { planId, toothNumber, procedureName, cost, notes }),
-    updateItem: (id: number, status: TreatmentPlanItem['status'], cost: number): Promise<void> =>
+    updateItem: (id: string, status: TreatmentPlanItem['status'], cost: number): Promise<void> =>
       invoke('plans:updateItem', { id, status, cost }),
-    deleteItem: (id: number): Promise<void> => invoke('plans:deleteItem', { id })
+    deleteItem: (id: string): Promise<void> => invoke('plans:deleteItem', { id })
   },
   periodontal: {
-    list: (patientId: number): Promise<PeriodontalChartEntry[]> => invoke('periodontal:list', { patientId }),
-    save: (patientId: number, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): Promise<void> =>
+    list: (patientId: string): Promise<PeriodontalChartEntry[]> => invoke('periodontal:list', { patientId }),
+    save: (patientId: string, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): Promise<void> =>
       invoke('periodontal:save', { patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes }),
-    delete: (patientId: number, toothNumber: string): Promise<void> => invoke('periodontal:delete', { patientId, toothNumber })
+    delete: (patientId: string, toothNumber: string): Promise<void> => invoke('periodontal:delete', { patientId, toothNumber })
   },
   procedureTemplates: {
     list: (): Promise<ProcedureTemplate[]> => invoke('procedureTemplates:list'),
     create: (t: Omit<ProcedureTemplate, 'id' | 'created_at'>): Promise<ProcedureTemplate> => invoke('procedureTemplates:create', t),
-    update: (id: number, data: Omit<ProcedureTemplate, 'id' | 'created_at'>): Promise<boolean> => invoke('procedureTemplates:update', { id, data }),
-    delete: (id: number): Promise<boolean> => invoke('procedureTemplates:delete', { id })
+    update: (id: string, data: Omit<ProcedureTemplate, 'id' | 'created_at'>): Promise<boolean> => invoke('procedureTemplates:update', { id, data }),
+    delete: (id: string): Promise<boolean> => invoke('procedureTemplates:delete', { id })
   },
   recall: {
     list: (): Promise<RecallReminder[]> => invoke('recall:list'),
-    create: (patientId: number, recallType: RecallType, dueDate: string, notes: string): Promise<RecallReminder> =>
+    create: (patientId: string, recallType: RecallType, dueDate: string, notes: string): Promise<RecallReminder> =>
       invoke('recall:create', { patientId, recallType, dueDate, notes }),
-    complete: (id: number): Promise<boolean> => invoke('recall:complete', { id }),
-    delete: (id: number): Promise<boolean> => invoke('recall:delete', { id })
+    complete: (id: string): Promise<boolean> => invoke('recall:complete', { id }),
+    delete: (id: string): Promise<boolean> => invoke('recall:delete', { id })
   },
 records: {
-    list: (kind: string, patientId?: number): Promise<Record<string, unknown>[]> =>
+    list: (kind: string, patientId?: string): Promise<Record<string, unknown>[]> =>
       invoke('rec:list', { kind, patientId }),
     save: (kind: string, data: Record<string, unknown>): Promise<Record<string, unknown>> =>
       invoke('rec:save', { kind, data }),
-    delete: (kind: string, id: number): Promise<boolean> => invoke('rec:delete', { kind, id })
+    delete: (kind: string, id: string): Promise<boolean> => invoke('rec:delete', { kind, id })
   },
   printing: {
     list: (): Promise<PrinterInfo[]> => invoke('printing:list'),
-    receipt: (invoiceId: number): Promise<{ ok: boolean; error?: string }> => invoke('printing:receipt', { invoiceId }),
-    patientReport: (patientId: number, mode: PatientReportMode): Promise<{ ok: boolean; error?: string }> =>
+    receipt: (invoiceId: string): Promise<{ ok: boolean; error?: string }> => invoke('printing:receipt', { invoiceId }),
+    patientReport: (patientId: string, mode: PatientReportMode): Promise<{ ok: boolean; error?: string }> =>
       invoke('printing:patientReport', { patientId, mode }),
-    prescription: (req: { patientId: number; medicationIds: number[]; diagnosis?: string; note?: string }): Promise<{ ok: boolean; error?: string }> =>
+    prescription: (req: { patientId: string; medicationIds: string[]; diagnosis?: string; note?: string }): Promise<{ ok: boolean; error?: string }> =>
       invoke('printing:prescription', req),
     document: (req: { title: string; subtitle?: string; content: string; patientName?: string }): Promise<{ ok: boolean; error?: string }> =>
       invoke('printing:document', req)

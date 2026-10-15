@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, copyFileSync, readFileSync, unlinkSync, rmSync, 
 import { join, basename, extname } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { dataDir, dbFilePath } from './config'
-import { dedupeCatalog, seedDefaultData, upgradePricesToStudy, upgradeSeedsToStudy } from './seed'
+import { dedupeAppointments, dedupeCatalog, dedupeExpenses, dedupeMaterials, seedDefaultData, upgradePricesToStudy, upgradeSeedsToStudy } from './seed'
+import { newId, stableId } from './ids'
 import type {
   Appointment,
   CatalogBomInput,
@@ -93,6 +94,9 @@ export function initDb(): void {
   enableCloudDefaults()
   upgradePricesToStudy()
   dedupeCatalog()
+  dedupeMaterials()
+  dedupeAppointments()
+  dedupeExpenses()
   repairZeroMaterialTotals()
 }
 
@@ -120,10 +124,100 @@ function enableCloudDefaults(): void {
   }
 }
 
+/** تعبير SQLite يولّد UUIDv4 نصّيًا كقيمة افتراضية لعمود المعرّف. */
+const ID_DEFAULT =
+  "lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-'||substr('89ab',abs(random())%4+1,1)||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6)))"
+
+/** الأعمدة المرتبطة بمفاتيح أجنبية → الجدول الأب (لتحويلها إلى UUID عند الترحيل). */
+const FK_PARENTS: Record<string, string> = {
+  patient_id: 'patients',
+  invoice_id: 'invoices',
+  material_id: 'materials',
+  catalog_id: 'catalog',
+  plan_id: 'treatment_plans',
+  item_id: 'invoice_items'
+}
+
+/** نوع عمود `id` في جدول ('INTEGER' للقواعد القديمة، 'TEXT' للجديدة). */
+function tableIdType(t: string): string {
+  try {
+    const row = db.prepare(`SELECT type FROM pragma_table_info('${t}') WHERE name='id'`).get() as unknown as { type?: string } | undefined
+    return String(row?.type ?? '').toUpperCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * ترحيل idempotent للمفاتيح: يكتشف الجداول القديمة (id INTEGER) ويعيد بناءها بـ id نصّي UUID.
+ * يُشتق UUID القديم حتميًا من (اسم الجدول، المعرّف) عبر stableId، فتتفق كل الأجهزة على نفس المفاتيح.
+ */
+function migrateIds(): void {
+  const tables = (
+    db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\'")
+      .all() as unknown as { name: string }[]
+  )
+    .map((r) => r.name)
+    .filter((t) => tableIdType(t) === 'INTEGER')
+  if (tables.length === 0) return
+
+  try {
+    const d = new Date()
+    const p = (n: number): string => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+    backupDatabase(join(dbPath, '..', `backup-before-uuid-${stamp}.db`))
+  } catch {
+    /* النسخة الاحتياطية اختيارية: لا توقف الترحيل إن تعذّرت */
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF')
+  db.exec('PRAGMA legacy_alter_table = ON')
+  db.prepare('BEGIN').run()
+  try {
+    for (const t of tables) {
+      const cols = (db.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as unknown as { name: string }[]).map(
+        (c) => c.name
+      )
+      const rows = db.prepare(`SELECT * FROM "${t}"`).all() as unknown as Record<string, unknown>[]
+      const ddl = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?").get(t) as unknown as { sql: string })
+        .sql
+      const newDdl = ddl
+        .replace(
+          /id\s+INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/i,
+          `id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT})`
+        )
+        .replace(/\b(patient_id|invoice_id|material_id|catalog_id|plan_id|item_id)\s+INTEGER\b/gi, '$1 TEXT')
+      db.exec(`ALTER TABLE "${t}" RENAME TO "_mig_${t}"`)
+      db.exec(newDdl)
+      const ins = db.prepare(
+        `INSERT INTO "${t}" (${cols.map((c) => `"${c}"`).join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+      )
+      for (const r of rows) {
+        const vals = cols.map((c) => {
+          if (c === 'id') return stableId(t, r[c] as number) ?? null
+          if (FK_PARENTS[c]) return stableId(FK_PARENTS[c], r[c] as number | null)
+          return (r[c] ?? null) as string | number | null
+        })
+        ins.run(...vals)
+      }
+      db.exec(`DROP TABLE "_mig_${t}"`)
+    }
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  } finally {
+    db.exec('PRAGMA legacy_alter_table = OFF')
+    db.exec('PRAGMA foreign_keys = ON')
+  }
+  db.exec('DROP TABLE IF EXISTS _sync_delta')
+}
+
 function migrate(): void {
   db.exec(`
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'cashier',
@@ -131,7 +225,7 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS patients (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   name TEXT NOT NULL,
   phone TEXT NOT NULL DEFAULT '',
   birth_date TEXT NOT NULL DEFAULT '',
@@ -142,8 +236,8 @@ CREATE TABLE IF NOT EXISTS patients (
   updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS appointments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL,
   time TEXT NOT NULL DEFAULT '',
   reason TEXT NOT NULL DEFAULT '',
@@ -153,22 +247,22 @@ CREATE TABLE IF NOT EXISTS appointments (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS catalog (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   name TEXT NOT NULL,
   price INTEGER NOT NULL DEFAULT 0,
   description TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS catalog_materials (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  catalog_id INTEGER NOT NULL,
-  material_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  catalog_id TEXT NOT NULL,
+  material_id TEXT NOT NULL,
   qty REAL NOT NULL DEFAULT 1,
   FOREIGN KEY (catalog_id) REFERENCES catalog(id) ON DELETE CASCADE,
   FOREIGN KEY (material_id) REFERENCES materials(id)
 );
 CREATE TABLE IF NOT EXISTS materials (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   name TEXT NOT NULL,
   category TEXT NOT NULL DEFAULT '',
   unit TEXT NOT NULL DEFAULT '',
@@ -180,9 +274,9 @@ CREATE TABLE IF NOT EXISTS materials (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   invoice_no TEXT NOT NULL UNIQUE,
-  patient_id INTEGER NOT NULL,
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL,
   usd_rate REAL NOT NULL DEFAULT 0,
   subtotal INTEGER NOT NULL DEFAULT 0,
@@ -196,25 +290,25 @@ CREATE TABLE IF NOT EXISTS invoices (
   FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
 CREATE TABLE IF NOT EXISTS invoice_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  invoice_id TEXT NOT NULL,
   name TEXT NOT NULL,
   cost INTEGER NOT NULL DEFAULT 0,
   qty INTEGER NOT NULL DEFAULT 1,
-  catalog_id INTEGER,
+  catalog_id TEXT,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS invoice_materials (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  invoice_id INTEGER NOT NULL,
-  item_id INTEGER NOT NULL,
-  material_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  invoice_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  material_id TEXT NOT NULL,
   qty REAL NOT NULL DEFAULT 0,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS stock_movements (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  material_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  material_id TEXT NOT NULL,
   qty REAL NOT NULL,
   operation TEXT NOT NULL,
   reference TEXT NOT NULL DEFAULT '',
@@ -224,7 +318,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS expenses (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   category TEXT NOT NULL,
   amount INTEGER NOT NULL DEFAULT 0,
   note TEXT NOT NULL DEFAULT '',
@@ -237,8 +331,8 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS patient_files (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   filename TEXT NOT NULL,
   stored_name TEXT NOT NULL,
   ftype TEXT NOT NULL DEFAULT 'other',
@@ -249,8 +343,8 @@ CREATE TABLE IF NOT EXISTS patient_files (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS patient_medications (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   scientific_name TEXT NOT NULL DEFAULT '',
   trade_name TEXT NOT NULL DEFAULT '',
   dose TEXT NOT NULL DEFAULT '',
@@ -272,7 +366,7 @@ CREATE TABLE IF NOT EXISTS patient_medications (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS medicines (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   trade_name TEXT NOT NULL DEFAULT '',
   scientific_name TEXT NOT NULL DEFAULT '',
   dose TEXT NOT NULL DEFAULT '',
@@ -283,8 +377,8 @@ CREATE TABLE IF NOT EXISTS medicines (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS dental_charts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   tooth_number TEXT NOT NULL,
   condition TEXT NOT NULL DEFAULT 'healthy',
   surfaces TEXT NOT NULL DEFAULT '',
@@ -294,8 +388,8 @@ CREATE TABLE IF NOT EXISTS dental_charts (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS treatment_plans (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   title TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'proposed',
   total_cost INTEGER NOT NULL DEFAULT 0,
@@ -305,8 +399,8 @@ CREATE TABLE IF NOT EXISTS treatment_plans (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS treatment_plan_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  plan_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  plan_id TEXT NOT NULL,
   tooth_number TEXT NOT NULL DEFAULT '',
   procedure_name TEXT NOT NULL,
   cost INTEGER NOT NULL DEFAULT 0,
@@ -316,8 +410,8 @@ CREATE TABLE IF NOT EXISTS treatment_plan_items (
   FOREIGN KEY (plan_id) REFERENCES treatment_plans(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS periodontal_charts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   tooth_number TEXT NOT NULL,
   pocket_depth INTEGER NOT NULL DEFAULT 0,
   bleeding INTEGER NOT NULL DEFAULT 0,
@@ -328,7 +422,7 @@ CREATE TABLE IF NOT EXISTS periodontal_charts (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS procedure_templates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   name TEXT NOT NULL,
   category TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
@@ -337,8 +431,8 @@ CREATE TABLE IF NOT EXISTS procedure_templates (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS recall_reminders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   recall_type TEXT NOT NULL DEFAULT 'checkup',
   due_date TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
@@ -347,8 +441,8 @@ CREATE TABLE IF NOT EXISTS recall_reminders (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS tooth_history (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   tooth_number TEXT NOT NULL DEFAULT '',
   date TEXT NOT NULL DEFAULT '',
   procedure_name TEXT NOT NULL DEFAULT '',
@@ -358,8 +452,8 @@ CREATE TABLE IF NOT EXISTS tooth_history (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS anesthesia_records (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT '',
   tooth_number TEXT NOT NULL DEFAULT '',
   anesthesia_type TEXT NOT NULL DEFAULT '',
@@ -371,8 +465,8 @@ CREATE TABLE IF NOT EXISTS anesthesia_records (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS lab_cases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT '',
   lab_name TEXT NOT NULL DEFAULT '',
   case_type TEXT NOT NULL DEFAULT '',
@@ -388,8 +482,8 @@ CREATE TABLE IF NOT EXISTS lab_cases (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS implant_records (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   tooth_number TEXT NOT NULL DEFAULT '',
   date TEXT NOT NULL DEFAULT '',
   brand TEXT NOT NULL DEFAULT '',
@@ -401,8 +495,8 @@ CREATE TABLE IF NOT EXISTS implant_records (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS consent_forms (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT '',
   procedure_name TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
@@ -412,8 +506,8 @@ CREATE TABLE IF NOT EXISTS consent_forms (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS risk_assessments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT '',
   caries_risk TEXT NOT NULL DEFAULT '',
   perio_risk TEXT NOT NULL DEFAULT '',
@@ -423,8 +517,8 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS referrals (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  patient_id INTEGER NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
+  patient_id TEXT NOT NULL,
   date TEXT NOT NULL DEFAULT '',
   direction TEXT NOT NULL DEFAULT 'out',
   specialist TEXT NOT NULL DEFAULT '',
@@ -436,28 +530,28 @@ CREATE TABLE IF NOT EXISTS referrals (
   FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS clinical_note_templates (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   title TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS education_materials (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   title TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS postop_instructions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   procedure_name TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS sterilization_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   date TEXT NOT NULL DEFAULT '',
   cycle_no TEXT NOT NULL DEFAULT '',
   device TEXT NOT NULL DEFAULT '',
@@ -471,7 +565,7 @@ CREATE TABLE IF NOT EXISTS sterilization_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS insurance_fees (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT PRIMARY KEY NOT NULL DEFAULT (${ID_DEFAULT}),
   code TEXT NOT NULL DEFAULT '',
   procedure_name TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT '',
@@ -480,6 +574,7 @@ CREATE TABLE IF NOT EXISTS insurance_fees (
   created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 `)
+  migrateIds()
   ensureCurrencyColumns()
   ensurePatientColumns()
   ensurePatientFileColumns()
@@ -697,7 +792,7 @@ function parsePermissions(raw: string): PermissionOverride | undefined {
 export function listUsers(): User[] {
   const rows = db.prepare('SELECT id, username, role, full_name, created_at, permissions FROM users ORDER BY id').all() as unknown as Record<string, unknown>[]
   return rows.map((r) => ({
-    id: r.id as number,
+    id: r.id as string,
     username: String(r.username),
     role: r.role as Role,
     full_name: String(r.full_name),
@@ -710,12 +805,12 @@ export function createUser(username: string, password: string, role: Role, full_
   const hash = hashPassword(password)
   const permsJson = permissions ? JSON.stringify(permissions) : ''
   const r = db
-    .prepare('INSERT INTO users (username, password_hash, role, full_name, permissions) VALUES (?,?,?,?,?)')
-    .run(username, hash, role as string, full_name, permsJson)
-  return { id: Number(r.lastInsertRowid), username, role, full_name, created_at: new Date().toISOString(), permissions }
+    .prepare('INSERT INTO users (username, password_hash, role, full_name, permissions) VALUES (?,?,?,?,?) RETURNING id')
+    .get(username, hash, role as string, full_name, permsJson) as unknown as { id: string }
+  return { id: r.id, username, role, full_name, created_at: new Date().toISOString(), permissions }
 }
 
-export function updateUser(id: number, username: string, role: string, full_name: string, password?: string, permissions?: PermissionOverride): void {
+export function updateUser(id: string, username: string, role: string, full_name: string, password?: string, permissions?: PermissionOverride): void {
   const permsJson = permissions !== undefined ? JSON.stringify(permissions) : undefined
   if (password) {
     const hash = hashPassword(password)
@@ -740,13 +835,13 @@ export function updateUser(id: number, username: string, role: string, full_name
   }
 }
 
-export function deleteUser(id: number): void {
+export function deleteUser(id: string): void {
   db.prepare('DELETE FROM users WHERE id=?').run(id)
 }
 
-export function findLogin(username: string): { id: number; username: string; password_hash: string; role: string; full_name: string; permissions?: PermissionOverride } | undefined {
+export function findLogin(username: string): { id: string; username: string; password_hash: string; role: string; full_name: string; permissions?: PermissionOverride } | undefined {
   const row = db.prepare('SELECT * FROM users WHERE username=?').get(username) as unknown as
-    | { id: number; username: string; password_hash: string; role: string; full_name: string; permissions: string }
+    | { id: string; username: string; password_hash: string; role: string; full_name: string; permissions: string }
     | undefined
   if (!row) return undefined
   return {
@@ -774,9 +869,9 @@ export function listPatients(search?: string): Patient[] {
 export function createPatient(p: Omit<Patient, 'id' | 'created_at'>): Patient {
   const r = db
     .prepare(
-      'INSERT INTO patients (name, phone, birth_date, gender, address, notes, national_id, allergies, chronic_diseases, physiological_status, medical_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+      'INSERT INTO patients (name, phone, birth_date, gender, address, notes, national_id, allergies, chronic_diseases, physiological_status, medical_notes) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id'
     )
-    .run(
+    .get(
       latinDigits(p.name),
       latinDigits(p.phone),
       p.birth_date,
@@ -788,8 +883,8 @@ export function createPatient(p: Omit<Patient, 'id' | 'created_at'>): Patient {
       latinDigits(p.chronic_diseases ?? ''),
       latinDigits(p.physiological_status ?? ''),
       latinDigits(p.medical_notes ?? '')
-    )
-  return { ...p, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+    ) as unknown as { id: string }
+  return { ...p, id: r.id, created_at: new Date().toISOString() }
 }
 
 // ---- سجل أدوية المريض ----
@@ -837,7 +932,7 @@ function medValues(m: MedicationInput): (string | number)[] {
   ]
 }
 
-export function listMedications(patientId: number): Medication[] {
+export function listMedications(patientId: string): Medication[] {
   return db
     .prepare('SELECT * FROM patient_medications WHERE patient_id=? ORDER BY active DESC, id DESC')
     .all(patientId) as unknown as Medication[]
@@ -850,15 +945,12 @@ export function saveMedication(m: MedicationInput & { id?: number }): Medication
     return db.prepare('SELECT * FROM patient_medications WHERE id=?').get(m.id) as unknown as Medication
   }
   const placeholders = MED_COLS.map(() => '?').join(', ')
-  const r = db
-    .prepare(`INSERT INTO patient_medications (${MED_COLS.join(', ')}) VALUES (${placeholders})`)
-    .run(...medValues(m))
   return db
-    .prepare('SELECT * FROM patient_medications WHERE id=?')
-    .get(Number(r.lastInsertRowid)) as unknown as Medication
+    .prepare(`INSERT INTO patient_medications (${MED_COLS.join(', ')}) VALUES (${placeholders}) RETURNING *`)
+    .get(...medValues(m)) as unknown as Medication
 }
 
-export function deleteMedication(id: number): void {
+export function deleteMedication(id: string): void {
   db.prepare('DELETE FROM patient_medications WHERE id=?').run(id)
 }
 
@@ -1028,19 +1120,18 @@ export function listMedicines(): Medicine[] {
 }
 
 export function createMedicine(m: MedicineInput): Medicine {
-  const r = db
-    .prepare(`INSERT INTO medicines (${MEDICINE_COLS.join(', ')}) VALUES (${MEDICINE_COLS.map(() => '?').join(', ')})`)
-    .run(...medicineValues(m))
-  return db.prepare('SELECT * FROM medicines WHERE id=?').get(Number(r.lastInsertRowid)) as unknown as Medicine
+  return db
+    .prepare(`INSERT INTO medicines (${MEDICINE_COLS.join(', ')}) VALUES (${MEDICINE_COLS.map(() => '?').join(', ')}) RETURNING *`)
+    .get(...medicineValues(m)) as unknown as Medicine
 }
 
-export function updateMedicine(id: number, m: MedicineInput): Medicine {
+export function updateMedicine(id: string, m: MedicineInput): Medicine {
   const sets = MEDICINE_COLS.map((c) => `${c}=?`).join(', ')
   db.prepare(`UPDATE medicines SET ${sets} WHERE id=?`).run(...medicineValues(m), id)
   return db.prepare('SELECT * FROM medicines WHERE id=?').get(id) as unknown as Medicine
 }
 
-export function deleteMedicine(id: number): void {
+export function deleteMedicine(id: string): void {
   db.prepare('DELETE FROM medicines WHERE id=?').run(id)
 }
 
@@ -1064,7 +1155,7 @@ function classifyAttachment(ext: string): { ftype: PatientAttachment['ftype']; m
   return { ftype: 'other', mime: e === '.pdf' ? 'application/pdf' : 'application/octet-stream' }
 }
 
-function patientFilesDir(patientId: number): string {
+function patientFilesDir(patientId: string): string {
   const dir = join(dataDir(), 'patient_files', String(patientId))
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
@@ -1074,13 +1165,13 @@ export function attachmentPath(row: PatientAttachment): string {
   return join(dataDir(), 'patient_files', String(row.patient_id), row.stored_name)
 }
 
-export function listPatientFiles(patientId: number): PatientAttachment[] {
+export function listPatientFiles(patientId: string): PatientAttachment[] {
   return db
     .prepare('SELECT * FROM patient_files WHERE patient_id=? ORDER BY id DESC')
     .all(patientId) as unknown as PatientAttachment[]
 }
 
-export function getPatientFileRecord(id: number): PatientAttachment {
+export function getPatientFileRecord(id: string): PatientAttachment {
   const row = db.prepare('SELECT * FROM patient_files WHERE id=?').get(id) as unknown as
     | PatientAttachment
     | undefined
@@ -1088,7 +1179,7 @@ export function getPatientFileRecord(id: number): PatientAttachment {
   return row
 }
 
-export function addPatientFile(patientId: number, srcPath: string): PatientAttachment {
+export function addPatientFile(patientId: string, srcPath: string): PatientAttachment {
   const patient = db.prepare('SELECT id FROM patients WHERE id=?').get(patientId)
   if (!patient) throw new Error('المريض غير موجود')
   if (!existsSync(srcPath)) throw new Error('الملف غير موجود: ' + srcPath)
@@ -1100,10 +1191,10 @@ export function addPatientFile(patientId: number, srcPath: string): PatientAttac
   copyFileSync(srcPath, dest)
   const size = statSync(dest).size
   const r = db
-    .prepare('INSERT INTO patient_files (patient_id, filename, stored_name, ftype, mime, size) VALUES (?,?,?,?,?,?)')
-    .run(patientId, original, storedName, ftype, mime, size)
+    .prepare('INSERT INTO patient_files (patient_id, filename, stored_name, ftype, mime, size) VALUES (?,?,?,?,?,?) RETURNING id')
+    .get(patientId, original, storedName, ftype, mime, size) as unknown as { id: string }
   return {
-    id: Number(r.lastInsertRowid),
+    id: r.id,
     patient_id: patientId,
     filename: original,
     stored_name: storedName,
@@ -1116,14 +1207,14 @@ export function addPatientFile(patientId: number, srcPath: string): PatientAttac
 }
 
 /** ربط مرفق (صورة أشعة) بسنّ معيّن أو بمنطقة عامة */
-export function setPatientFileTooth(id: number, toothNumber: string): void {
+export function setPatientFileTooth(id: string, toothNumber: string): void {
   const row = db.prepare('SELECT id FROM patient_files WHERE id=?').get(id)
   if (!row) throw new Error('المرفق غير موجود')
   db.prepare('UPDATE patient_files SET tooth_number=? WHERE id=?').run(toothNumber, id)
 }
 
 /** يقرأ الملف من القرص ويعيده كـ data URL لعرضه داخل البرنامج */
-export function readPatientFile(id: number): { attachment: PatientAttachment; dataUrl: string } {
+export function readPatientFile(id: string): { attachment: PatientAttachment; dataUrl: string } {
   const row = getPatientFileRecord(id)
   const p = attachmentPath(row)
   if (!existsSync(p)) throw new Error('الملف غير موجود على القرص')
@@ -1132,7 +1223,7 @@ export function readPatientFile(id: number): { attachment: PatientAttachment; da
   return { attachment: row, dataUrl: `data:${mime};base64,${buf.toString('base64')}` }
 }
 
-export function deletePatientFile(id: number): void {
+export function deletePatientFile(id: string): void {
   const row = getPatientFileRecord(id)
   db.prepare('DELETE FROM patient_files WHERE id=?').run(id)
   try {
@@ -1143,7 +1234,7 @@ export function deletePatientFile(id: number): void {
   }
 }
 
-export function getPatientFile(id: number): PatientFileResult {
+export function getPatientFile(id: string): PatientFileResult {
   const patient = db.prepare('SELECT * FROM patients WHERE id=?').get(id) as unknown as Patient | undefined
   if (!patient) throw new Error('المريض غير موجود')
   const appointments = db
@@ -1161,7 +1252,7 @@ export function getPatientFile(id: number): PatientFileResult {
   }
 }
 
-export function updatePatient(id: number, p: Partial<Omit<Patient, 'id' | 'created_at'>>): void {
+export function updatePatient(id: string, p: Partial<Omit<Patient, 'id' | 'created_at'>>): void {
   const sets: string[] = []
   const vals: (string | number | null)[] = []
   const textCols = [
@@ -1192,7 +1283,7 @@ export function updatePatient(id: number, p: Partial<Omit<Patient, 'id' | 'creat
   db.prepare(`UPDATE patients SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
-export function deletePatient(id: number): void {
+export function deletePatient(id: string): void {
   db.prepare('BEGIN').run()
   try {
     db.prepare('DELETE FROM invoice_materials WHERE invoice_id IN (SELECT id FROM invoices WHERE patient_id=?)').run(id)
@@ -1236,12 +1327,12 @@ export function listAppointments(date?: string, status?: string): Appointment[] 
 
 export function createAppointment(a: Omit<Appointment, 'id' | 'created_at'>): Appointment {
   const r = db
-    .prepare('INSERT INTO appointments (patient_id, date, time, reason, notes, status) VALUES (?,?,?,?,?,?)')
-    .run(a.patient_id, a.date, a.time, a.reason, a.notes, a.status)
-  return { ...a, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+    .prepare('INSERT INTO appointments (patient_id, date, time, reason, notes, status) VALUES (?,?,?,?,?,?) RETURNING id')
+    .get(a.patient_id, a.date, a.time, a.reason, a.notes, a.status) as unknown as { id: string }
+  return { ...a, id: r.id, created_at: new Date().toISOString() }
 }
 
-export function updateAppointment(id: number, a: Partial<Omit<Appointment, 'id' | 'created_at'>>): void {
+export function updateAppointment(id: string, a: Partial<Omit<Appointment, 'id' | 'created_at'>>): void {
   const sets: string[] = []
   const vals: (string | number | null)[] = []
   const textCols = ['date', 'time', 'reason', 'notes', 'status'] as const
@@ -1253,25 +1344,25 @@ export function updateAppointment(id: number, a: Partial<Omit<Appointment, 'id' 
   }
   if (a.patient_id !== undefined) {
     sets.push('patient_id=?')
-    vals.push(Number(a.patient_id))
+    vals.push(String(a.patient_id))
   }
   if (sets.length === 0) return
   vals.push(id)
   db.prepare(`UPDATE appointments SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
-export function deleteAppointment(id: number): void {
+export function deleteAppointment(id: string): void {
   db.prepare('DELETE FROM appointments WHERE id=?').run(id)
 }
 
 // ---- Catalog ----
 function catalogRow(row: Record<string, unknown>): CatalogItem {
-  const id = Number(row.id)
+  const id = String(row.id)
   const mats = db
     .prepare(
       'SELECT cm.material_id, m.name, cm.qty, m.unit, m.cost FROM catalog_materials cm JOIN materials m ON m.id=cm.material_id WHERE cm.catalog_id=?'
     )
-    .all(id) as unknown as { material_id: number; name: string; qty: number; unit: string; cost: number }[]
+    .all(id) as unknown as { material_id: string; name: string; qty: number; unit: string; cost: number }[]
   const cost = mats.reduce((s, m) => s + Math.round(m.cost * m.qty), 0)
   const price = Number(row.price) || 0
   const margin = price - cost
@@ -1297,18 +1388,18 @@ export function listCatalog(): CatalogItem[] {
   return rows.map(catalogRow)
 }
 
-export function getCatalogItem(id: number): CatalogItem | undefined {
+export function getCatalogItem(id: string): CatalogItem | undefined {
   const row = db.prepare('SELECT * FROM catalog WHERE id=?').get(id) as unknown as Record<string, unknown> | undefined
   return row ? catalogRow(row) : undefined
 }
 
-function syncBom(catalogId: number, resources: CatalogBomInput[]): void {
+function syncBom(catalogId: string, resources: CatalogBomInput[]): void {
   db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?').run(catalogId)
   const ins = db.prepare('INSERT INTO catalog_materials (catalog_id, material_id, qty) VALUES (?,?,?)')
   for (const m of resources) ins.run(catalogId, m.material_id, m.qty)
 }
 
-function recalcCatalogUsd(id: number): void {
+function recalcCatalogUsd(id: string): void {
   const rate = getSettings().usd_rate
   if (!(rate > 0)) return
   db.prepare(
@@ -1335,9 +1426,9 @@ export function createCatalogItem(
   const total = Number.isNaN(totalN) ? 0 : totalN
   return withTx(() => {
     const r = db
-      .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?)')
-      .run(name, price, qty, total, latinDigits(c.description ?? ''))
-    const id = Number(r.lastInsertRowid)
+      .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?) RETURNING id')
+      .get(name, price, qty, total, latinDigits(c.description ?? '')) as unknown as { id: string }
+    const id = r.id
     syncBom(id, c.materials ?? [])
     recalcCatalogUsd(id)
     return getCatalogItem(id)!
@@ -1345,7 +1436,7 @@ export function createCatalogItem(
 }
 
 export function updateCatalogItem(
-  id: number,
+  id: string,
   c: Partial<Omit<CatalogItem, 'id' | 'created_at' | 'cost' | 'margin' | 'materials'>> & { materials?: CatalogBomInput[] }
 ): void {
   const sets: string[] = []
@@ -1383,7 +1474,7 @@ export function updateCatalogItem(
   })
 }
 
-export function deleteCatalogItem(id: number): void {
+export function deleteCatalogItem(id: string): void {
   withTx(() => {
     db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?').run(id)
     db.prepare('DELETE FROM catalog WHERE id=?').run(id)
@@ -1450,13 +1541,41 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> 
   const total = Number.isNaN(totalN) ? cost * quantity : totalN
   const costUsd = rate > 0 ? Math.round((cost / rate) * 100) / 100 : 0
   const totalUsd = rate > 0 ? Math.round((total / rate) * 100) / 100 : 0
+  // لا نُدرج صفاً ثانياً لنفس اسم المادة: ندمج الكمية في الصف الموجود بدل إنشاء تكرار
+  const existing = db
+    .prepare('SELECT * FROM materials WHERE TRIM(name)=? COLLATE NOCASE')
+    .get(clean.name) as unknown as Record<string, unknown> | undefined
+  if (existing) {
+    const id = Number(existing.id)
+    const newQty = (Number(existing.quantity) || 0) + quantity
+    const newCost = cost > 0 ? cost : Number(existing.cost) || 0
+    const newMin = Math.max(Number(existing.min_qty) || 0, minQty)
+    const newTotal = newCost * (newQty > 0 ? newQty : 1)
+    db.prepare(
+      'UPDATE materials SET name=?, category=?, unit=?, quantity=?, min_qty=?, cost=?, cost_usd=?, total=?, total_usd=?, supplier=?, notes=? WHERE id=?'
+    ).run(
+      clean.name,
+      clean.category || String(existing.category ?? ''),
+      clean.unit || String(existing.unit ?? ''),
+      newQty,
+      newMin,
+      newCost,
+      rate > 0 ? Math.round((newCost / rate) * 100) / 100 : 0,
+      newTotal,
+      rate > 0 ? Math.round((newTotal / rate) * 100) / 100 : 0,
+      clean.supplier || String(existing.supplier ?? ''),
+      clean.notes || String(existing.notes ?? ''),
+      id
+    )
+    return mapMaterialRow(db.prepare('SELECT * FROM materials WHERE id=?').get(id) as unknown as Record<string, unknown>, rate)
+  }
   const r = db
-    .prepare('INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-    .run(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes)
-  return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, total, total_usd: totalUsd, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+    .prepare('INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id')
+    .get(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes) as unknown as { id: string }
+  return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, total, total_usd: totalUsd, id: r.id, created_at: new Date().toISOString() }
 }
 
-export function updateMaterial(id: number, m: Partial<Omit<Material, 'id' | 'created_at'>>): void {
+export function updateMaterial(id: string, m: Partial<Omit<Material, 'id' | 'created_at'>>): void {
   const rate = getSettings().usd_rate
   const sets: string[] = []
   const vals: (string | number | null)[] = []
@@ -1493,7 +1612,7 @@ export function updateMaterial(id: number, m: Partial<Omit<Material, 'id' | 'cre
   db.prepare(`UPDATE materials SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
-export function deleteMaterial(id: number): void {
+export function deleteMaterial(id: string): void {
   db.prepare('BEGIN').run()
   try {
     db.prepare('DELETE FROM catalog_materials WHERE material_id=?').run(id)
@@ -1505,7 +1624,7 @@ export function deleteMaterial(id: number): void {
   }
 }
 
-export function adjustStock(id: number, qtyDelta: number, operation: string, reference: string, user_name: string, note: string): void {
+export function adjustStock(id: string, qtyDelta: number, operation: string, reference: string, user_name: string, note: string): void {
   db.prepare('UPDATE materials SET quantity = quantity + ? WHERE id=?').run(qtyDelta, id)
   db.prepare('INSERT INTO stock_movements (material_id, qty, operation, reference, user_name, note) VALUES (?,?,?,?,?,?)').run(
     id,
@@ -1608,7 +1727,7 @@ export function importCatalogRows(rows: Record<string, string>[]): ImportResult 
       const qty = numAny(r.qty)
       const total = numAny(r.total)
       const existing = db.prepare('SELECT * FROM catalog WHERE TRIM(name)=? COLLATE NOCASE').get(name) as unknown as
-        | { id: number; name: string; price: number; description: string }
+        | { id: string; name: string; price: number; description: string }
         | undefined
       if (existing) {
         updateCatalogItem(existing.id, {
@@ -1686,16 +1805,102 @@ export function importPatients(rows: Record<string, string>[]): ImportResult {
   return { ok, updated, skip }
 }
 
+/** استيراد المواعيد مع منع التكرار: المفتاح = (المريض، التاريخ، الوقت).
+ *  إن وُجد موعد مطابق يُحدَّث سببه/حالته/ملاحظاته بدل إنشاء صف جديد. المريض غير
+ *  المعروف يُنشأ باسمه (كما يفعل استيراد المخزون) فلا تُفقد الصفوف. */
+export function importAppointments(rows: Record<string, string>[]): ImportResult {
+  let ok = 0
+  let updated = 0
+  let skip = 0
+  db.prepare('BEGIN').run()
+  try {
+    const findPatient = db.prepare('SELECT * FROM patients WHERE TRIM(name)=? COLLATE NOCASE')
+    const findAppt = db.prepare('SELECT id, reason, notes, status FROM appointments WHERE patient_id=? AND date=? AND time=?')
+    for (const r of rows) {
+      const name = latinDigits((r.patient_name ?? '').trim())
+      const date = (r.date ?? '').trim()
+      if (!name || !date) {
+        skip++
+        continue
+      }
+      const patient = findPatient.get(name) as unknown as Patient | undefined
+      const patientId = patient
+        ? patient.id
+        : createPatient({ name, phone: '', birth_date: '', gender: '', address: '', notes: '' }).id
+      const time = (r.time ?? '').trim()
+      const reason = (r.reason ?? '').trim()
+      const status = r.status === 'done' || r.status === 'cancelled' || r.status === 'scheduled' ? r.status : 'scheduled'
+      const notes = (r.notes ?? '').trim()
+      const existing = findAppt.get(patientId, date, time) as unknown as
+        | { id: string; reason?: string; notes?: string; status?: string }
+        | undefined
+      if (existing) {
+        updateAppointment(existing.id, {
+          reason: reason || existing.reason,
+          notes: notes || existing.notes,
+          status: status || existing.status
+        })
+        updated++
+      } else {
+        createAppointment({ patient_id: patientId, date, time, reason, status: status as Appointment['status'], notes })
+        ok++
+      }
+    }
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+  return { ok, updated, skip }
+}
+
+/** استيراد المصاريف مع منع التكرار: المفتاح = (التاريخ، التصنيف، المبلغ، الصنف).
+ *  إن وُجد مصروف مطابق يُحدَّث بدل إنشاء صف جديد. */
+export function importExpenses(rows: Record<string, string>[]): ImportResult {
+  let ok = 0
+  let updated = 0
+  let skip = 0
+  db.prepare('BEGIN').run()
+  try {
+    const createdBy = 'استيراد Excel'
+    const findExp = db.prepare('SELECT id FROM expenses WHERE date=? AND category=? AND amount=? AND note=?')
+    for (const r of rows) {
+      const category = latinDigits((r.category ?? '').trim())
+      const amountN = numAny((r.amount ?? '').trim())
+      if (!category || !Number.isFinite(amountN) || amountN <= 0) {
+        skip++
+        continue
+      }
+      const amount = Math.round(amountN)
+      const date = (r.date ?? '').trim() || new Date().toISOString().slice(0, 10)
+      const note = latinDigits((r.note ?? '').trim())
+      const existing = findExp.get(date, category, amount, note) as unknown as { id: string } | undefined
+      if (existing) {
+        updateExpense(existing.id, { category, amount, date, note })
+        updated++
+      } else {
+        createExpense({ category, amount, note, date, created_by: createdBy })
+        ok++
+      }
+    }
+    db.prepare('COMMIT').run()
+  } catch (e) {
+    db.prepare('ROLLBACK').run()
+    throw e
+  }
+  return { ok, updated, skip }
+}
+
 // ---- Invoices ----
 export interface InvoiceWithItems extends Omit<Invoice, 'items'> {
   items: {
-    id: number
+    id: string
     invoice_id?: number
     name: string
     cost: number
     qty: number
-    catalog_id: number | null
-    materials: { material_id: number; qty: number }[]
+    catalog_id: string | null
+    materials: { material_id: string; qty: number }[]
   }[]
 }
 
@@ -1723,19 +1928,19 @@ export function listInvoicesSince(sinceDate: string): Invoice[] {
     .all(sinceDate) as unknown as Invoice[]
 }
 
-export function getInvoice(id: number): InvoiceWithItems | undefined {
+export function getInvoice(id: string): InvoiceWithItems | undefined {
   const inv = db.prepare('SELECT i.*, p.name AS patient_name, p.phone AS patient_phone FROM invoices i JOIN patients p ON p.id=i.patient_id WHERE i.id=?').get(id) as unknown as Invoice | undefined
   if (!inv) return undefined
   const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id=?').all(id) as {
-    id: number
+    id: string
     name: string
     cost: number
     qty: number
-    catalog_id: number | null
+    catalog_id: string | null
   }[]
   const withMaterials = items.map((it) => {
     const materials = db.prepare('SELECT material_id, qty FROM invoice_materials WHERE item_id=?').all(it.id) as unknown as {
-      material_id: number
+      material_id: string
       qty: number
     }[]
     return { ...it, materials }
@@ -1750,7 +1955,7 @@ export function nextInvoiceNo(): string {
 }
 
 export function createInvoice(input: {
-  patient_id: number
+  patient_id: string
   date: string
   usd_rate: number
   discount: number
@@ -1770,9 +1975,9 @@ export function createInvoice(input: {
   try {
     const r = db
       .prepare(
-        'INSERT INTO invoices (invoice_no, patient_id, date, usd_rate, subtotal, discount, total, paid, subtotal_usd, discount_usd, total_usd, paid_usd, notes, created_by) VALUES (?,?,?,?,?,?,?,0,?,?,?,0,?,?)'
+        'INSERT INTO invoices (invoice_no, patient_id, date, usd_rate, subtotal, discount, total, paid, subtotal_usd, discount_usd, total_usd, paid_usd, notes, created_by) VALUES (?,?,?,?,?,?,?,0,?,?,?,0,?,?) RETURNING id'
       )
-      .run(
+      .get(
         invoice_no,
         input.patient_id,
         input.date,
@@ -1785,18 +1990,18 @@ export function createInvoice(input: {
         R(total),
         input.notes,
         input.user_name
-      )
-    const invoiceId = Number(r.lastInsertRowid)
-    const insItem = db.prepare('INSERT INTO invoice_items (invoice_id, name, cost, qty, catalog_id, cost_usd) VALUES (?,?,?,?,?,?)')
+      ) as unknown as { id: string }
+    const invoiceId = r.id
+    const insItem = db.prepare('INSERT INTO invoice_items (invoice_id, name, cost, qty, catalog_id, cost_usd) VALUES (?,?,?,?,?,?) RETURNING id')
     const insMat = db.prepare('INSERT INTO invoice_materials (invoice_id, item_id, material_id, qty) VALUES (?,?,?,?)')
     for (const it of input.items) {
-      const ir = insItem.run(invoiceId, it.name, it.cost, it.qty, it.catalog_id, R(it.cost))
-      const itemId = Number(ir.lastInsertRowid)
+      const ir = insItem.get(invoiceId, it.name, it.cost, it.qty, it.catalog_id, R(it.cost)) as unknown as { id: string }
+      const itemId = ir.id
       let mats = it.materials
       if (it.catalog_id && (!mats || mats.length === 0)) {
         mats = db
           .prepare('SELECT material_id, qty FROM catalog_materials WHERE catalog_id=?')
-          .all(it.catalog_id) as unknown as { material_id: number; qty: number }[]
+          .all(it.catalog_id) as unknown as { material_id: string; qty: number }[]
         if (mats.length > 0) {
           const cur = db.prepare('UPDATE invoice_items SET name=? WHERE id=?')
           cur.run(`${it.name} (${(db.prepare('SELECT name FROM catalog WHERE id=?').get(it.catalog_id) as unknown as { name: string }).name})`, itemId)
@@ -1822,7 +2027,7 @@ export function createInvoice(input: {
   }
 }
 
-export function addPayment(id: number, amount: number): Invoice {
+export function addPayment(id: string, amount: number): Invoice {
   const inv = db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as unknown as Invoice
   const paid = inv.paid + amount
   const newStatus = paid >= inv.total ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
@@ -1831,7 +2036,7 @@ export function addPayment(id: number, amount: number): Invoice {
   return db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as unknown as Invoice
 }
 
-export function deleteInvoice(id: number): void {
+export function deleteInvoice(id: string): void {
   db.prepare('BEGIN').run()
   try {
     db.prepare('DELETE FROM invoice_materials WHERE invoice_id=?').run(id)
@@ -1884,9 +2089,9 @@ export function createExpense(e: Omit<Expense, 'id' | 'created_at'>): Expense {
   const nextDue = recurring ? clean.next_due || nextDueDate(clean.date, recurrence) : ''
   const r = db
     .prepare(
-      'INSERT INTO expenses (category, amount, amount_usd, note, date, created_by, is_recurring, recurrence, next_due) VALUES (?,?,?,?,?,?,?,?,?)'
+      'INSERT INTO expenses (category, amount, amount_usd, note, date, created_by, is_recurring, recurrence, next_due) VALUES (?,?,?,?,?,?,?,?,?) RETURNING id'
     )
-    .run(clean.category, amount, amountUsd, clean.note, clean.date, clean.created_by, recurring, recurrence, nextDue)
+    .get(clean.category, amount, amountUsd, clean.note, clean.date, clean.created_by, recurring, recurrence, nextDue) as unknown as { id: string }
   return {
     ...clean,
     amount,
@@ -1894,7 +2099,7 @@ export function createExpense(e: Omit<Expense, 'id' | 'created_at'>): Expense {
     is_recurring: recurring,
     recurrence,
     next_due: nextDue,
-    id: Number(r.lastInsertRowid),
+    id: r.id,
     created_at: new Date().toISOString()
   }
 }
@@ -1905,7 +2110,7 @@ export interface MaterialPurchaseInput {
   note: string
   date: string
   created_by: string
-  material_id: number
+  material_id: string
   quantity: number
 }
 
@@ -1961,7 +2166,7 @@ export function receiveMaterialInvoice(input: MaterialPurchaseInput): Expense {
   }
 }
 
-export function updateExpense(id: number, e: Partial<Omit<Expense, 'id' | 'created_at'>>): void {
+export function updateExpense(id: string, e: Partial<Omit<Expense, 'id' | 'created_at'>>): void {
   const rate = getSettings().usd_rate
   const sets: string[] = []
   const vals: (string | number | null)[] = []
@@ -2002,7 +2207,7 @@ export function updateExpense(id: number, e: Partial<Omit<Expense, 'id' | 'creat
   db.prepare(`UPDATE expenses SET ${sets.join(', ')} WHERE id=?`).run(...vals)
 }
 
-export function deleteExpense(id: number): void {
+export function deleteExpense(id: string): void {
   db.prepare('DELETE FROM expenses WHERE id=?').run(id)
 }
 
@@ -2095,8 +2300,9 @@ export function dashboardStats(period: string): DashboardStats {
   const unpaid_total = (
     db.prepare("SELECT COALESCE(SUM(total-paid),0) s FROM invoices WHERE status!='paid'").get() as { s: number }
   ).s
+  // قيمة المخزون = الكلفة × الكمية الفعلية، وتُتجاهل الأصناف التي كميتها 0 أو سالبة
   const inventory_value = (
-    db.prepare('SELECT COALESCE(SUM(CASE WHEN cost > 0 THEN cost * (CASE WHEN quantity > 0 THEN quantity ELSE 1 END) ELSE total END),0) v FROM materials').get() as { v: number }
+    db.prepare('SELECT COALESCE(SUM(CASE WHEN quantity > 0 THEN cost * quantity ELSE 0 END),0) v FROM materials').get() as { v: number }
   ).v
 
   const byIncome = db
@@ -2141,12 +2347,12 @@ export function dashboardStats(period: string): DashboardStats {
 }
 
 // ---- Dental Charts (Odontogram) ----
-export function listDentalCharts(patientId: number): DentalChartEntry[] {
+export function listDentalCharts(patientId: string): DentalChartEntry[] {
   return db.prepare('SELECT * FROM dental_charts WHERE patient_id=? ORDER BY tooth_number').all(patientId) as unknown as DentalChartEntry[]
 }
 
-export function saveDentalChart(patientId: number, toothNumber: string, condition: string, surfaces: string, notes: string): void {
-  const existing = db.prepare('SELECT id FROM dental_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: number } | undefined
+export function saveDentalChart(patientId: string, toothNumber: string, condition: string, surfaces: string, notes: string): void {
+  const existing = db.prepare('SELECT id FROM dental_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: string } | undefined
   if (existing) {
     db.prepare("UPDATE dental_charts SET condition=?, surfaces=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?").run(condition, surfaces, notes, existing.id)
   } else {
@@ -2154,12 +2360,12 @@ export function saveDentalChart(patientId: number, toothNumber: string, conditio
   }
 }
 
-export function deleteDentalChart(patientId: number, toothNumber: string): void {
+export function deleteDentalChart(patientId: string, toothNumber: string): void {
   db.prepare('DELETE FROM dental_charts WHERE patient_id=? AND tooth_number=?').run(patientId, toothNumber)
 }
 
 // ---- Treatment Plans ----
-export function listTreatmentPlans(patientId: number): TreatmentPlan[] {
+export function listTreatmentPlans(patientId: string): TreatmentPlan[] {
   const plans = db.prepare('SELECT * FROM treatment_plans WHERE patient_id=? ORDER BY id DESC').all(patientId) as unknown as TreatmentPlan[]
   return plans.map((p) => ({
     ...p,
@@ -2167,16 +2373,16 @@ export function listTreatmentPlans(patientId: number): TreatmentPlan[] {
   }))
 }
 
-export function createTreatmentPlan(patientId: number, title: string, notes: string): TreatmentPlan {
-  const r = db.prepare('INSERT INTO treatment_plans (patient_id, title, notes) VALUES (?,?,?)').run(patientId, title, notes)
-  return { id: Number(r.lastInsertRowid), patient_id: patientId, title, status: 'proposed', total_cost: 0, notes, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), items: [] }
+export function createTreatmentPlan(patientId: string, title: string, notes: string): TreatmentPlan {
+  const r = db.prepare('INSERT INTO treatment_plans (patient_id, title, notes) VALUES (?,?,?) RETURNING id').get(patientId, title, notes) as unknown as { id: string }
+  return { id: r.id, patient_id: patientId, title, status: 'proposed', total_cost: 0, notes, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), items: [] }
 }
 
-export function updateTreatmentPlan(id: number, title: string, status: string, notes: string): void {
+export function updateTreatmentPlan(id: string, title: string, status: string, notes: string): void {
   db.prepare("UPDATE treatment_plans SET title=?, status=?, notes=?, updated_at=datetime('now','localtime') WHERE id=?").run(title, status, notes, id)
 }
 
-export function deleteTreatmentPlan(id: number): void {
+export function deleteTreatmentPlan(id: string): void {
   db.prepare('BEGIN').run()
   try {
     db.prepare('DELETE FROM treatment_plan_items WHERE plan_id=?').run(id)
@@ -2195,27 +2401,27 @@ export function addTreatmentPlanItem(planId: number, toothNumber: string, proced
   db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
 }
 
-export function updateTreatmentPlanItem(id: number, status: string, cost: number): void {
+export function updateTreatmentPlanItem(id: string, status: string, cost: number): void {
   db.prepare('UPDATE treatment_plan_items SET status=?, cost=? WHERE id=?').run(status, cost, id)
-  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: number }).plan_id
+  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: string }).plan_id
   const total = (db.prepare('SELECT COALESCE(SUM(cost),0) AS s FROM treatment_plan_items WHERE plan_id=? AND status!="cancelled"').get(planId) as { s: number }).s
   db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
 }
 
-export function deleteTreatmentPlanItem(id: number): void {
-  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: number }).plan_id
+export function deleteTreatmentPlanItem(id: string): void {
+  const planId = (db.prepare('SELECT plan_id FROM treatment_plan_items WHERE id=?').get(id) as { plan_id: string }).plan_id
   db.prepare('DELETE FROM treatment_plan_items WHERE id=?').run(id)
   const total = (db.prepare('SELECT COALESCE(SUM(cost),0) AS s FROM treatment_plan_items WHERE plan_id=? AND status!="cancelled"').get(planId) as { s: number }).s
   db.prepare('UPDATE treatment_plans SET total_cost=? WHERE id=?').run(total, planId)
 }
 
 // ---- Periodontal Charts ----
-export function listPeriodontalCharts(patientId: number): PeriodontalChartEntry[] {
+export function listPeriodontalCharts(patientId: string): PeriodontalChartEntry[] {
   return db.prepare('SELECT * FROM periodontal_charts WHERE patient_id=? ORDER BY tooth_number').all(patientId) as unknown as PeriodontalChartEntry[]
 }
 
-export function savePeriodontalChart(patientId: number, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): void {
-  const existing = db.prepare('SELECT id FROM periodontal_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: number } | undefined
+export function savePeriodontalChart(patientId: string, toothNumber: string, pocketDepth: number, bleeding: number, mobility: number, recession: number, notes: string): void {
+  const existing = db.prepare('SELECT id FROM periodontal_charts WHERE patient_id=? AND tooth_number=?').get(patientId, toothNumber) as { id: string } | undefined
   if (existing) {
     db.prepare('UPDATE periodontal_charts SET pocket_depth=?, bleeding=?, mobility=?, recession=?, notes=? WHERE id=?').run(pocketDepth, bleeding, mobility, recession, notes, existing.id)
   } else {
@@ -2223,7 +2429,7 @@ export function savePeriodontalChart(patientId: number, toothNumber: string, poc
   }
 }
 
-export function deletePeriodontalChart(patientId: number, toothNumber: string): void {
+export function deletePeriodontalChart(patientId: string, toothNumber: string): void {
   db.prepare('DELETE FROM periodontal_charts WHERE patient_id=? AND tooth_number=?').run(patientId, toothNumber)
 }
 
@@ -2233,15 +2439,15 @@ export function listProcedureTemplates(): ProcedureTemplate[] {
 }
 
 export function createProcedureTemplate(t: Omit<ProcedureTemplate, 'id' | 'created_at'>): ProcedureTemplate {
-  const r = db.prepare('INSERT INTO procedure_templates (name, category, description, default_cost, materials) VALUES (?,?,?,?,?)').run(t.name, t.category, t.description, t.default_cost, t.materials)
-  return { ...t, id: Number(r.lastInsertRowid), created_at: new Date().toISOString() }
+  const r = db.prepare('INSERT INTO procedure_templates (name, category, description, default_cost, materials) VALUES (?,?,?,?,?) RETURNING id').get(t.name, t.category, t.description, t.default_cost, t.materials) as unknown as { id: string }
+  return { ...t, id: r.id, created_at: new Date().toISOString() }
 }
 
-export function updateProcedureTemplate(id: number, t: Omit<ProcedureTemplate, 'id' | 'created_at'>): void {
+export function updateProcedureTemplate(id: string, t: Omit<ProcedureTemplate, 'id' | 'created_at'>): void {
   db.prepare('UPDATE procedure_templates SET name=?, category=?, description=?, default_cost=?, materials=? WHERE id=?').run(t.name, t.category, t.description, t.default_cost, t.materials, id)
 }
 
-export function deleteProcedureTemplate(id: number): void {
+export function deleteProcedureTemplate(id: string): void {
   db.prepare('DELETE FROM procedure_templates WHERE id=?').run(id)
 }
 
@@ -2254,16 +2460,16 @@ export function listRecallReminders(): RecallReminder[] {
   `).all() as unknown as RecallReminder[]
 }
 
-export function createRecallReminder(patientId: number, recallType: RecallType, dueDate: string, notes: string): RecallReminder {
-  const r = db.prepare('INSERT INTO recall_reminders (patient_id, recall_type, due_date, notes) VALUES (?,?,?,?)').run(patientId, recallType, dueDate, notes)
-  return { id: Number(r.lastInsertRowid), patient_id: patientId, recall_type: recallType, due_date: dueDate, status: 'pending', notes, created_at: new Date().toISOString() }
+export function createRecallReminder(patientId: string, recallType: RecallType, dueDate: string, notes: string): RecallReminder {
+  const r = db.prepare('INSERT INTO recall_reminders (patient_id, recall_type, due_date, notes) VALUES (?,?,?,?) RETURNING id').get(patientId, recallType, dueDate, notes) as unknown as { id: string }
+  return { id: r.id, patient_id: patientId, recall_type: recallType, due_date: dueDate, status: 'pending', notes, created_at: new Date().toISOString() }
 }
 
-export function completeRecallReminder(id: number): void {
+export function completeRecallReminder(id: string): void {
   db.prepare("UPDATE recall_reminders SET status='done' WHERE id=?").run(id)
 }
 
-export function deleteRecallReminder(id: number): void {
+export function deleteRecallReminder(id: string): void {
   db.prepare('DELETE FROM recall_reminders WHERE id=?').run(id)
 }
 
@@ -2328,11 +2534,10 @@ export function saveRecord(kind: string, data: Record<string, unknown>): Record<
     return db.prepare(`SELECT * FROM ${def.table} WHERE id=?`).get(id) as unknown as Record<string, unknown>
   }
   const vals = def.cols.map((c) => toSql(data[c]))
-  const r = db.prepare(`INSERT INTO ${def.table} (${def.cols.join(',')}) VALUES (${def.cols.map(() => '?').join(',')})`).run(...vals)
-  return db.prepare(`SELECT * FROM ${def.table} WHERE id=?`).get(Number(r.lastInsertRowid)) as unknown as Record<string, unknown>
+  return db.prepare(`INSERT INTO ${def.table} (${def.cols.join(',')}) VALUES (${def.cols.map(() => '?').join(',')}) RETURNING *`).get(...vals) as unknown as Record<string, unknown>
 }
 
-export function deleteRecord(kind: string, id: number): void {
+export function deleteRecord(kind: string, id: string): void {
   const def = RECORD_DEFS[kind]
   if (!def) throw new Error('نوع سجل غير معروف: ' + kind)
   db.prepare(`DELETE FROM ${def.table} WHERE id=?`).run(Number(id))

@@ -177,7 +177,7 @@ async function main() {
     address: '',
     notes: ''
   })
-  check('إنشاء مريض', Number(patient.id) > 0, patient.id)
+  check('إنشاء مريض', !!patient.id, patient.id)
 
   const q0 = Number(api.listMaterials().find((m) => m.id === mat0.id).quantity)
   const inv = api.createInvoice({
@@ -189,7 +189,7 @@ async function main() {
     user_name: 'Tester',
     items: [{ name: 'Filling', cost: 100, qty: 3, catalog_id: null, materials: [{ material_id: mat0.id, qty: 2 }] }]
   })
-  check('إنشاء فاتورة', Number(inv.id) > 0, inv.id)
+  check('إنشاء فاتورة', !!inv.id, inv.id)
   check('subtotal = cost*qty', Number(inv.subtotal) === 300, inv.subtotal)
   check('total = subtotal - discount', Number(inv.total) === 250, inv.total)
   check('total_usd = round(total/rate,2)', Number(inv.total_usd) === Math.round((250 / rate) * 100) / 100, inv.total_usd)
@@ -220,7 +220,7 @@ async function main() {
     supplier: 'sup',
     notes: ''
   })
-  check('إنشاء صنف', Number(made.id) > 0, made.id)
+  check('إنشاء صنف', !!made.id, made.id)
   check('total المحسوب = cost*quantity', Number(made.total) === 7000, made.total)
   check('cost_usd = round(cost/rate,2)', Number(made.cost_usd) === Math.round((1000 / rate) * 100) / 100, made.cost_usd)
 
@@ -237,14 +237,14 @@ async function main() {
     notes: '',
     total: 0
   })
-  check('إنشاء صنف بإجمالٍ صريح 0', Number(emptyTotal.id) > 0, emptyTotal.id)
-  check('قاعدة: التخزين احتفظ بـ 0 كما أدخل المستخدم', Number(one('materials', 'id=' + emptyTotal.id).total) === 0)
+  check('إنشاء صنف بإجمالٍ صريح 0', !!emptyTotal.id, emptyTotal.id)
+  check('قاعدة: التخزين احتفظ بـ 0 كما أدخل المستخدم', Number(one('materials', "id='" + emptyTotal.id + "'").total) === 0)
   const listedTotal = Number(api.listMaterials().find((m) => m.id === emptyTotal.id).total)
   check('listMaterials لا يُرجع إجمالياً فارغاً — يشتق = cost*quantity', listedTotal === 2000, listedTotal)
   const noEmpty = api.listMaterials().filter((m) => m.quantity > 0 && m.cost > 0).filter((m) => !m.total || Number(m.total) <= 0)
   check('لا صف واحد بإجمالٍ فارغ بين أصناف الكلفة والكمية', noEmpty.length === 0, noEmpty.map((m) => m.name))
   api.repairZeroMaterialTotals()
-  check('إصلاح الإقلاع يكتب الإجمالي في القاعدة', Number(one('materials', 'id=' + emptyTotal.id).total) === 2000)
+  check('إصلاح الإقلاع يكتب الإجمالي في القاعدة', Number(one('materials', "id='" + emptyTotal.id + "'").total) === 2000)
 
   const dashInv = Number(api.dashboardStats('365').inventory_value)
   const sumTotals = api.listMaterials().reduce((s, m) => s + (Number(m.total) || 0), 0)
@@ -278,9 +278,9 @@ async function main() {
   check('صنف بكمية سالبة: الإجمالي = الكلفة (لا سالب/صفر)', nListed === 776, nListed)
 
   api.adjustStock(made.id, -3, 'adjust', '', 'Tester', 'test')
-  check('adjustStock يغيّر الكمية', Number(one('materials', 'id=' + made.id).quantity) === 4)
+  check('adjustStock يغيّر الكمية', Number(one('materials', "id='" + made.id + "'").quantity) === 4)
 
-  const beforePur = Number(one('materials', 'id=' + made.id).quantity)
+  const beforePur = Number(one('materials', "id='" + made.id + "'").quantity)
   const expPur = api.receiveMaterialInvoice({
     category: 'purchases',
     amount: 6000,
@@ -290,8 +290,8 @@ async function main() {
     quantity: 3,
     created_by: 'Tester'
   })
-  const mAfterPur = one('materials', 'id=' + made.id)
-  check('مصروف المشتريات أُنشئ', Number(expPur.id) > 0, expPur.id)
+  const mAfterPur = one('materials', "id='" + made.id + "'")
+  check('مصروف المشتريات أُنشئ', !!expPur.id, expPur.id)
   check('quantity زادت بالوحدات المشتراة', Number(mAfterPur.quantity) === beforePur + 3, mAfterPur.quantity)
   check('cost = round(amount/quantity)', Number(mAfterPur.cost) === Math.round(6000 / 3), mAfterPur.cost)
   check('total = quantity*cost بعد الشراء', Number(mAfterPur.total) === Number(mAfterPur.quantity) * Number(mAfterPur.cost), mAfterPur.total)
@@ -306,7 +306,7 @@ async function main() {
     date: new Date().toISOString().slice(0, 10),
     created_by: 'Tester'
   })
-  check('إنشاء مصروف', Number(exp.id) > 0, exp.id)
+  check('إنشاء مصروف', !!exp.id, exp.id)
   check('amount_usd = round(amount/rate,2)', Number(exp.amount_usd) === Math.round((2500 / rate) * 100) / 100, exp.amount_usd)
   check('listExpenses يجد المصروف', api.listExpenses().some((e) => e.id === exp.id))
 
@@ -345,7 +345,7 @@ async function main() {
     api.saveBaseline('cloud', t, rows(t))
   }
   const fpAfterPush = api.fingerprintDb().hash
-  const invRow = cloud.invoices.find((r) => Number(r.id) === Number(inv.id))
+  const invRow = cloud.invoices.find((r) => String(r.id) === String(inv.id))
   check('خطة الرفع تحمل الفاتورة الجديدة', !!invRow)
   check('السحابة تحمل الكمية المخفّضة من الفاتورة', Number(cloud.materials.find((m) => m.id === mat0.id).quantity) === q0 - 2)
 
@@ -354,11 +354,11 @@ async function main() {
   const counts = api.mergeIntoLocal('cloud', cloud, DELETE_ORDER, INSERT_ORDER)
   check('الدمج أدرج صفوفاً جديدة', counts.inserted > 0, counts)
   check('B استلم المريض', count('patients', "name='Test Patient'") === 1)
-  check('B استلم الفاتورة', count('invoices', 'id=' + inv.id) === 1)
+  check('B استلم الفاتورة', count('invoices', "id='" + inv.id + "'") === 1)
   check('B استلم مصروف الإيجار', count('expenses', "category='rent'") === 1)
-  const mB = one('materials', 'id=' + mat0.id)
+  const mB = one('materials', "id='" + mat0.id + "'")
   check('B حصل على نفس كمية المخزون', Number(mB.quantity) === q0 - 2, mB.quantity)
-  check('B حصل على كلفة/إجمالي الصنف المشترى', Number(one('materials', 'id=' + made.id).total) === Number(mAfterPur.total))
+  check('B حصل على كلفة/إجمالي الصنف المشترى', Number(one('materials', "id='" + made.id + "'").total) === Number(mAfterPur.total))
   check(
     'النسختان متطابقتان بعد المزامنة (بصمة واحدة)',
     api.fingerprintDb().hash === fpAfterPush,
@@ -389,7 +389,7 @@ async function main() {
   for (const t of INSERT_ORDER) applyPlan(t, api.planPush('cloud', t, rows(t)))
   useB()
   api.mergeIntoLocal('cloud', cloud, DELETE_ORDER, INSERT_ORDER)
-  check('المحلي يفوز عند التعارض', one('patients', 'id=' + patient.id).name === 'B Local Edit', one('patients', 'id=' + patient.id).name)
+  check('المحلي يفوز عند التعارض', one('patients', "id='" + patient.id + "'").name === 'B Local Edit', one('patients', "id='" + patient.id + "'").name)
 
   // ===================================================================
   section('استبعاد مفاتيح حالة المزامنة من الرفع')

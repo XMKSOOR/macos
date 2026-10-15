@@ -26,6 +26,8 @@ import {
   getSettings,
   importCatalogRows,
   importMaterials,
+  importAppointments,
+  importExpenses,
   getPatientFile,
   getPatientFileRecord,
   attachmentPath,
@@ -234,7 +236,7 @@ export function registerIpc(ipc: IpcMain): void {
   handle('users:update', (args) => {
     requireAuth('manageUsers')
     const { id, data } = args as {
-      id: number
+      id: string
       data: {
         username: string
         role: User['role']
@@ -248,7 +250,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('users:delete', (args) => {
     requireAuth('manageUsers')
-    const { id } = args as { id: number }
+    const { id } = args as { id: string }
     deleteUser(id)
     return true
   })
@@ -261,13 +263,13 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('patients:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: never }
+    const { id, data } = args as { id: string; data: never }
     updatePatient(id, data)
     return true
   })
   handle('patients:delete', (args) => {
     requireAuth('delete')
-    deletePatient((args as { id: number }).id)
+    deletePatient((args as { id: string }).id)
     return true
   })
   handle('patients:import', (args) => {
@@ -276,13 +278,13 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('patients:get', (args) => {
     requireAuth()
-    return getPatientFile((args as { id: number }).id)
+    return getPatientFile((args as { id: string }).id)
   })
 
   // ---- سجل أدوية المريض ----
   handle('medications:list', (args) => {
     requireAuth()
-    return listMedications((args as { patientId: number }).patientId)
+    return listMedications((args as { patientId: string }).patientId)
   })
   handle('medications:save', (args) => {
     requireAuth('edit')
@@ -290,7 +292,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('medications:delete', (args) => {
     requireAuth('edit')
-    deleteMedication((args as { id: number }).id)
+    deleteMedication((args as { id: string }).id)
     return true
   })
 
@@ -305,23 +307,23 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('medCatalog:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: MedicineInput }
+    const { id, data } = args as { id: string; data: MedicineInput }
     return updateMedicine(id, data)
   })
   handle('medCatalog:delete', (args) => {
     requireAuth('edit')
-    deleteMedicine((args as { id: number }).id)
+    deleteMedicine((args as { id: string }).id)
     return true
   })
 
   // ---- مرفقات المريض: صور، صور أشعة DICOM، ملفات (تُحفَظ محلياً فقط) ----
   handle('attachments:list', (args) => {
     requireAuth()
-    return listPatientFiles((args as { patientId: number }).patientId)
+    return listPatientFiles((args as { patientId: string }).patientId)
   })
   handle('attachments:add', async (args) => {
     requireAuth('edit')
-    const { patientId } = args as { patientId: number }
+    const { patientId } = args as { patientId: string }
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: 'اختر صور الأشعة أو الصور أو ملفات المريض',
       properties: ['openFile', 'multiSelections'],
@@ -338,23 +340,23 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('attachments:read', (args) => {
     requireAuth()
-    return readPatientFile((args as { id: number }).id)
+    return readPatientFile((args as { id: string }).id)
   })
   handle('attachments:delete', (args) => {
     requireAuth('edit')
-    deletePatientFile((args as { id: number }).id)
+    deletePatientFile((args as { id: string }).id)
     return true
   })
   handle('attachments:openExternal', async (args) => {
     requireAuth()
-    const row = getPatientFileRecord((args as { id: number }).id)
+    const row = getPatientFileRecord((args as { id: string }).id)
     const err = await shell.openPath(attachmentPath(row))
     if (err) throw new Error(err)
     return true
   })
   handle('attachments:setTooth', (args) => {
     requireAuth('edit')
-    const { id, toothNumber } = args as { id: number; toothNumber: string }
+    const { id, toothNumber } = args as { id: string; toothNumber: string }
     setPatientFileTooth(id, toothNumber ?? '')
     return true
   })
@@ -362,12 +364,12 @@ export function registerIpc(ipc: IpcMain): void {
   // ---- مخطط الأسنان (Odontogram) ----
   handle('dental:listChart', (args) => {
     requireAuth()
-    return listDentalCharts((args as { patientId: number }).patientId)
+    return listDentalCharts((args as { patientId: string }).patientId)
   })
   handle('dental:saveTooth', (args) => {
     requireAuth('edit')
     const { patientId, toothNumber, condition, surfaces, notes } = args as {
-      patientId: number
+      patientId: string
       toothNumber: string
       condition: ToothCondition
       surfaces: string
@@ -378,7 +380,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('dental:deleteTooth', (args) => {
     requireAuth('edit')
-    const { patientId, toothNumber } = args as { patientId: number; toothNumber: string }
+    const { patientId, toothNumber } = args as { patientId: string; toothNumber: string }
     deleteDentalChart(patientId, toothNumber)
     return true
   })
@@ -397,7 +399,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('rec:delete', (args) => {
     requireAuth('edit')
-    const { kind, id } = args as { kind: string; id: number }
+    const { kind, id } = args as { kind: string; id: string }
     if (!recordKindExists(kind)) throw new Error('نوع سجل غير معروف')
     deleteRecord(kind, id)
     return true
@@ -406,17 +408,17 @@ export function registerIpc(ipc: IpcMain): void {
   // ---- خطط العلاج ----
   handle('plans:list', (args): TreatmentPlan[] => {
     requireAuth()
-    return listTreatmentPlans((args as { patientId: number }).patientId)
+    return listTreatmentPlans((args as { patientId: string }).patientId)
   })
   handle('plans:create', (args) => {
     requireAuth('edit')
-    const { patientId, title, notes } = args as { patientId: number; title: string; notes: string }
+    const { patientId, title, notes } = args as { patientId: string; title: string; notes: string }
     return createTreatmentPlan(patientId, title, notes)
   })
   handle('plans:update', (args) => {
     requireAuth('edit')
     const { id, title, status, notes } = args as {
-      id: number
+      id: string
       title: string
       status: TreatmentPlanStatus
       notes: string
@@ -426,7 +428,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('plans:delete', (args) => {
     requireAuth('edit')
-    deleteTreatmentPlan((args as { id: number }).id)
+    deleteTreatmentPlan((args as { id: string }).id)
     return true
   })
   handle('plans:addItem', (args) => {
@@ -443,25 +445,25 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('plans:updateItem', (args) => {
     requireAuth('edit')
-    const { id, status, cost } = args as { id: number; status: TreatmentPlanItem['status']; cost: number }
+    const { id, status, cost } = args as { id: string; status: TreatmentPlanItem['status']; cost: number }
     updateTreatmentPlanItem(id, status, cost)
     return true
   })
   handle('plans:deleteItem', (args) => {
     requireAuth('edit')
-    deleteTreatmentPlanItem((args as { id: number }).id)
+    deleteTreatmentPlanItem((args as { id: string }).id)
     return true
   })
 
   // ---- قياسات اللثة ----
   handle('periodontal:list', (args) => {
     requireAuth()
-    return listPeriodontalCharts((args as { patientId: number }).patientId)
+    return listPeriodontalCharts((args as { patientId: string }).patientId)
   })
   handle('periodontal:save', (args) => {
     requireAuth('edit')
     const { patientId, toothNumber, pocketDepth, bleeding, mobility, recession, notes } = args as {
-      patientId: number
+      patientId: string
       toothNumber: string
       pocketDepth: number
       bleeding: number
@@ -474,7 +476,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('periodontal:delete', (args) => {
     requireAuth('edit')
-    const { patientId, toothNumber } = args as { patientId: number; toothNumber: string }
+    const { patientId, toothNumber } = args as { patientId: string; toothNumber: string }
     deletePeriodontalChart(patientId, toothNumber)
     return true
   })
@@ -490,13 +492,13 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('procedureTemplates:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: Omit<ProcedureTemplate, 'id' | 'created_at'> }
+    const { id, data } = args as { id: string; data: Omit<ProcedureTemplate, 'id' | 'created_at'> }
     updateProcedureTemplate(id, data)
     return true
   })
   handle('procedureTemplates:delete', (args) => {
     requireAuth('edit')
-    deleteProcedureTemplate((args as { id: number }).id)
+    deleteProcedureTemplate((args as { id: string }).id)
     return true
   })
 
@@ -508,7 +510,7 @@ export function registerIpc(ipc: IpcMain): void {
   handle('recall:create', (args) => {
     requireAuth('edit')
     const { patientId, recallType, dueDate, notes } = args as {
-      patientId: number
+      patientId: string
       recallType: RecallType
       dueDate: string
       notes: string
@@ -517,12 +519,12 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('recall:complete', (args) => {
     requireAuth('edit')
-    completeRecallReminder((args as { id: number }).id)
+    completeRecallReminder((args as { id: string }).id)
     return true
   })
   handle('recall:delete', (args) => {
     requireAuth('edit')
-    deleteRecallReminder((args as { id: number }).id)
+    deleteRecallReminder((args as { id: string }).id)
     return true
   })
 
@@ -537,14 +539,18 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('appointments:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: never }
+    const { id, data } = args as { id: string; data: never }
     updateAppointment(id, data)
     return true
   })
   handle('appointments:delete', (args) => {
     requireAuth('delete')
-    deleteAppointment((args as { id: number }).id)
+    deleteAppointment((args as { id: string }).id)
     return true
+  })
+  handle('appointments:import', (args) => {
+    requireAuth('import')
+    return importAppointments((args as { rows: Record<string, string>[] }).rows)
   })
 
   // ---- Catalog ----
@@ -555,13 +561,13 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('catalog:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: never }
+    const { id, data } = args as { id: string; data: never }
     updateCatalogItem(id, data)
     return true
   })
   handle('catalog:delete', (args) => {
     requireAuth('delete')
-    deleteCatalogItem((args as { id: number }).id)
+    deleteCatalogItem((args as { id: string }).id)
     return true
   })
   handle('catalog:importRows', (args) => {
@@ -577,18 +583,18 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('inventory:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: never }
+    const { id, data } = args as { id: string; data: never }
     updateMaterial(id, data)
     return true
   })
   handle('inventory:delete', (args) => {
     requireAuth('delete')
-    deleteMaterial((args as { id: number }).id)
+    deleteMaterial((args as { id: string }).id)
     return true
   })
   handle('inventory:adjust', (args) => {
     requireAuth('adjustStock')
-    const { id, qtyDelta, operation, note } = args as { id: number; qtyDelta: number; operation: string; note: string }
+    const { id, qtyDelta, operation, note } = args as { id: string; qtyDelta: number; operation: string; note: string }
     adjustStock(id, qtyDelta, operation, '', currentUser!.username, note)
     return true
   })
@@ -602,11 +608,11 @@ export function registerIpc(ipc: IpcMain): void {
   handle('invoices:nextNo', () => nextInvoiceNo())
   handle('invoices:list', (args) => listInvoices((args as { search?: string } | undefined)?.search))
   handle('invoices:since', (args) => listInvoicesSince((args as { since: string }).since))
-  handle('invoices:get', (args) => getInvoice((args as { id: number }).id))
+  handle('invoices:get', (args) => getInvoice((args as { id: string }).id))
   handle('invoices:create', (args) => {
     requireAuth()
     const input = args as {
-      patient_id: number
+      patient_id: string
       date: string
       usd_rate: number
       discount: number
@@ -617,12 +623,12 @@ export function registerIpc(ipc: IpcMain): void {
   })
   handle('invoices:pay', (args) => {
     requireAuth()
-    const { id, amount } = args as { id: number; amount: number }
+    const { id, amount } = args as { id: string; amount: number }
     return addPayment(id, amount)
   })
   handle('invoices:delete', (args) => {
     requireAuth('manageUsers')
-    deleteInvoice((args as { id: number }).id)
+    deleteInvoice((args as { id: string }).id)
     return true
   })
 
@@ -643,20 +649,20 @@ export function registerIpc(ipc: IpcMain): void {
       amount: number
       note: string
       date: string
-      material_id: number
+      material_id: string
       quantity: number
     }
     return receiveMaterialInvoice({ ...data, created_by: currentUser!.full_name || currentUser!.username })
   })
   handle('expenses:update', (args) => {
     requireAuth('edit')
-    const { id, data } = args as { id: number; data: never }
+    const { id, data } = args as { id: string; data: never }
     updateExpense(id, data)
     return true
   })
   handle('expenses:delete', (args) => {
     requireAuth('delete')
-    deleteExpense((args as { id: number }).id)
+    deleteExpense((args as { id: string }).id)
     return true
   })
   handle('expenses:due', (args) => {
@@ -666,6 +672,10 @@ export function registerIpc(ipc: IpcMain): void {
   handle('expenses:runDue', () => {
     requireAuth('edit')
     return materializeDueRecurringExpenses()
+  })
+  handle('expenses:importRows', (args) => {
+    requireAuth('import')
+    return importExpenses((args as { rows: Record<string, string>[] }).rows)
   })
 
   // ---- Dashboard ----
@@ -683,7 +693,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
 
   handle('printing:receipt', async (args) => {
-    const { invoiceId } = args as { invoiceId: number }
+    const { invoiceId } = args as { invoiceId: string }
     const invoice = getInvoice(invoiceId)
     if (!invoice) throw new Error('الفاتورة غير موجودة')
     const settings = getSettings()
@@ -692,7 +702,7 @@ export function registerIpc(ipc: IpcMain): void {
   })
 
   handle('printing:patientReport', async (args) => {
-    const { patientId, mode } = args as { patientId: number; mode: PatientReportMode }
+    const { patientId, mode } = args as { patientId: string; mode: PatientReportMode }
     const file = getPatientFile(patientId)
     const settings = getSettings()
     const html = buildPatientReportHtml(file, settings, mode === 'brief' ? 'brief' : 'full')

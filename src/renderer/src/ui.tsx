@@ -195,3 +195,42 @@ export function SearchBox({
 }): React.JSX.Element {
   return <input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
 }
+
+// ---- Drill-down page header (back button + breadcrumb + actions) ----
+export function DrillHead({
+  crumb,
+  current,
+  onBack,
+  children
+}: {
+  crumb: string
+  current: string
+  onBack: () => void
+  children?: ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="drill-head">
+      <button className="ghost small back-btn" onClick={onBack}>
+        ↩ رجوع
+      </button>
+      <nav className="breadcrumb" aria-label="مسار التنقل">
+        <button type="button" className="crumb-link" onClick={onBack}>
+          {crumb}
+        </button>
+        <span className="crumb-sep">›</span>
+        <span className="crumb-current">{current}</span>
+      </nav>
+      {children ? <div className="drill-actions">{children}</div> : null}
+    </div>
+  )
+}
+
+// ---- Read-only key/value meta grid ----
+export function KV({ label, children }: { label: string; children: ReactNode }): React.JSX.Element {
+  return (
+    <div className="kv">
+      <div className="kv-label">{label}</div>
+      <div className="kv-value">{children}</div>
+    </div>
+  )
+}

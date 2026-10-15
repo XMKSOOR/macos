@@ -10,7 +10,7 @@
 ## 1) تهيئة Supabase (مرة واحدة)
 
 1. افتح مشروعك في [supabase.com](https://supabase.com) ← **SQL Editor** ← **New query**.
-2. الصق كامل محتوى الملف [`schema.sql`](./schema.sql) ونفّذه. يُنشئ كل الجداول + الأمان (RLS) + دالة `reset_sequences`.
+2. الصق كامل محتوى الملف [`schema.sql`](./schema.sql) ونفّذه. يُنشئ كل الجداول (بمفاتيح UUID نصّية) + الأمان (RLS) + دالة البصمة `sync_table_digest`.
 3. أنشئ مستخدماً للتطبيق: **Authentication ← Users ← Add user ← Create new user**
    - أدخل بريداً وكلمة مرور، وفعّل «Auto Confirm User».
    - هذا الحساب هو ما ستسجّل به الدخول من التطبيق.

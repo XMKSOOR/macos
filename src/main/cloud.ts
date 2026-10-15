@@ -182,11 +182,7 @@ export async function cloudTest(): Promise<string> {
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
   const res = await request(cfg, '/patients?select=id&limit=1')
   if (!res.ok) await fail(res)
-  const seq = await request(cfg, '/rpc/reset_sequences', { method: 'POST', body: '{}' })
-  const seqOk = seq.ok
-  return seqOk
-    ? 'تم الاتصال بقاعدة بيانات Supabase Postgres بنجاح'
-    : 'تم الاتصال، لكن الدالة reset_sequences غير موجودة (نفّذ ملف schema.sql في Supabase)'
+  return 'تم الاتصال بقاعدة بيانات Supabase Postgres بنجاح'
 }
 
 export function cloudPullChanged(): number {
@@ -383,20 +379,6 @@ async function purgeRemoteMetaSettings(cfg: CloudConfig): Promise<void> {
   }
 }
 
-async function resetSequences(cfg: CloudConfig): Promise<void> {
-  try {
-    const res = await request(cfg, '/rpc/reset_sequences', { method: 'POST', body: '{}' })
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '')
-      console.warn(`[SYNC:cloud] reset_sequences لم يُنفّذ (${res.status}): ${txt.slice(0, 160)} — تأكد من وجود الدالة في schema.sql`)
-    } else {
-      console.log('[SYNC:cloud] reset_sequences ✓')
-    }
-  } catch (e) {
-    console.warn('[SYNC:cloud] reset_sequences فشل (غير مميت)', e instanceof Error ? e.message : e)
-  }
-}
-
 export async function cloudPush(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
@@ -415,7 +397,6 @@ export async function cloudPush(): Promise<string> {
   }
 
   await purgeRemoteMetaSettings(cfg)
-  await resetSequences(cfg)
 
   if (bad.size > 0) {
     const msg = `فشلت الجداول التالية: ${[...bad].join(', ')} — راجع السجل لتشخيص السبب`
@@ -466,7 +447,6 @@ export async function cloudSync(): Promise<number> {
   }
 
   await purgeRemoteMetaSettings(cfg)
-  await resetSequences(cfg)
   console.log(
     `[SYNC:cloud] sync انتهى: سحب(${counts.inserted} إدراج، ${counts.updated} تحديث، ${counts.deleted} حذف) / رفع(${pushed} محدث، ${removed} محذوف)`
   )

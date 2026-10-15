@@ -47,7 +47,7 @@ const TITLES: Record<ScreenKey, string> = {
 export default function App(): React.JSX.Element {
   const [user, setUser] = useState<User | null>(null)
   const [screen, setScreen] = useState<ScreenKey>('dashboard')
-  const [patientFileId, setPatientFileId] = useState<number | null>(null)
+  const [patientFileId, setPatientFileId] = useState<string | null>(null)
   const [settings, setSettings] = useState<Settings | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const toast = useToast()
@@ -62,7 +62,7 @@ export default function App(): React.JSX.Element {
       .catch(() => setUser(null))
   }, [])
 
-  const openPatient = useCallback((id: number): void => {
+  const openPatient = useCallback((id: string): void => {
     setPatientFileId(id)
     setScreen('patients')
   }, [])
@@ -143,7 +143,10 @@ export default function App(): React.JSX.Element {
             <button
               key={n.key}
               className={`nav-item ${screen === n.key ? 'active' : ''}`}
-              onClick={() => setScreen(n.key)}
+              onClick={() => {
+                setScreen(n.key)
+                setPatientFileId(null)
+              }}
             >
               {n.key === 'dental' ? (
                 <img className="mini-icon mini-logo" src={logo} alt="" />

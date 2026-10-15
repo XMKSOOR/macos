@@ -33,7 +33,7 @@ function catLabel(c: MedicationInput['category']): string {
   return MED_CATEGORIES.find((x) => x.value === c)?.label ?? c
 }
 
-const emptyMed = (patientId: number): MedicationInput & { id?: number } => ({
+const emptyMed = (patientId: string): MedicationInput & { id?: string } => ({
   id: undefined,
   patient_id: patientId,
   scientific_name: '',
@@ -79,7 +79,7 @@ export default function PatientFile({
   rate,
   onClose
 }: {
-  id: number
+  id: string
   rate: number
   onClose: () => void
 }): React.JSX.Element {
@@ -91,11 +91,11 @@ export default function PatientFile({
   const [viewing, setViewing] = useState<PatientAttachment | null>(null)
   const [deletingFile, setDeletingFile] = useState<PatientAttachment | null>(null)
   const [meds, setMeds] = useState<Medication[]>([])
-  const [medEdit, setMedEdit] = useState<(MedicationInput & { id?: number }) | null>(null)
+  const [medEdit, setMedEdit] = useState<(MedicationInput & { id?: string }) | null>(null)
   const [savingMed, setSavingMed] = useState(false)
   const [deletingMed, setDeletingMed] = useState<Medication | null>(null)
   const [catalog, setCatalog] = useState<Medicine[]>([])
-  const [rx, setRx] = useState<{ ids: number[]; diagnosis: string; note: string } | null>(null)
+  const [rx, setRx] = useState<{ ids: string[]; diagnosis: string; note: string } | null>(null)
   const [printingRx, setPrintingRx] = useState(false)
   const [printing, setPrinting] = useState<'brief' | 'full' | null>(null)
   const toast = useToast()
@@ -233,7 +233,7 @@ export default function PatientFile({
   }
 
   const applyCatalog = (value: string): void => {
-    const med = catalog.find((c) => c.id === Number(value))
+    const med = catalog.find((c) => c.id === value)
     if (!med) return
     setMedEdit((m) =>
       m
@@ -290,7 +290,7 @@ export default function PatientFile({
     setRx({ ids: activeIds.length ? activeIds : meds.map((m) => m.id), diagnosis: '', note: '' })
   }
 
-  const toggleRx = (medId: number): void =>
+  const toggleRx = (medId: string): void =>
     setRx((r) => (r ? { ...r, ids: r.ids.includes(medId) ? r.ids.filter((x) => x !== medId) : [...r.ids, medId] } : r))
 
   const printRx = (): void => {
@@ -337,38 +337,46 @@ export default function PatientFile({
   const activeMeds = meds.filter((m) => m.active).length
 
   const setF = (patch: Partial<PatientForm>): void => setForm((f) => (f ? { ...f, ...patch } : f))
-  const setM = (patch: Partial<MedicationInput & { id?: number }>): void =>
+  const setM = (patch: Partial<MedicationInput & { id?: string }>): void =>
     setMedEdit((m) => (m ? { ...m, ...patch } : m))
 
   return (
     <>
-      <Modal
-        title={data ? `ملف المريض: ${data.patient.name}` : 'ملف المريض'}
-        onClose={onClose}
-        wide
-        footer={
-          data ? (
-            <div className="flex between" style={{ width: '100%' }}>
-              <span className="muted">
-                {totals.count} فاتورة — المدفوع <CurrencyCell lbp={totals.paid} rate={rate} /> — المتبقي{' '}
-                <CurrencyCell lbp={totals.remaining} rate={rate} />
-              </span>
-              <div className="flex">
-                <button className="soft" disabled={printing !== null} onClick={() => print('brief')}>
-                  {printing === 'brief' ? '...' : '🖨 كشف مختصر'}
-                </button>
-                <button className="soft" disabled={printing !== null} onClick={() => print('full')}>
-                  {printing === 'full' ? '...' : '🖨 السجل الكامل'}
-                </button>
-                <button className="soft" disabled={meds.length === 0} onClick={openRx}>
-                  🖨 وصفة طبية
-                </button>
-                <button onClick={onClose}>إغلاق</button>
-              </div>
-            </div>
-          ) : undefined
-        }
-      >
+      <div className="drill-page">
+        <div className="drill-head">
+          <button className="ghost small back-btn" onClick={onClose}>
+            ↩ رجوع
+          </button>
+          <nav className="breadcrumb" aria-label="مسار التنقل">
+            <button type="button" className="crumb-link" onClick={onClose}>
+              المرضى
+            </button>
+            <span className="crumb-sep">›</span>
+            <span className="crumb-current">{data ? data.patient.name : 'ملف المريض'}</span>
+          </nav>
+          <div className="drill-actions">
+            <button className="soft small" disabled={printing !== null} onClick={() => print('brief')}>
+              {printing === 'brief' ? '...' : '🖨 كشف مختصر'}
+            </button>
+            <button className="soft small" disabled={printing !== null} onClick={() => print('full')}>
+              {printing === 'full' ? '...' : '🖨 السجل الكامل'}
+            </button>
+            <button className="soft small" disabled={meds.length === 0} onClick={openRx}>
+              🖨 وصفة طبية
+            </button>
+          </div>
+        </div>
+
+        {data && (
+          <div className="drill-summary">
+            <span className="muted">
+              {totals.count} فاتورة — المدفوع <CurrencyCell lbp={totals.paid} rate={rate} /> — المتبقي{' '}
+              <CurrencyCell lbp={totals.remaining} rate={rate} />
+            </span>
+          </div>
+        )}
+
+        <div className="drill-body">
         {loading ? (
           <div className="muted">جاري التحميل...</div>
         ) : !data || !form ? (
@@ -664,7 +672,8 @@ export default function PatientFile({
             </div>
           </div>
         )}
-      </Modal>
+        </div>
+      </div>
 
       {medEdit && (
         <Modal

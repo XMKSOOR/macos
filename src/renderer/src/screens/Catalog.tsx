@@ -8,9 +8,10 @@ import type { CatalogItem, Material, Role, Settings } from '../lib'
 import { can, fmt, parseNumber } from '../lib'
 import { CurrencyInput } from '../CurrencyInput'
 import { NumberInput } from '../NumberInput'
+import CatalogItemFile from './CatalogItemFile'
 
 interface BomLine {
-  material_id: number
+  material_id: string
   qty: number
 }
 
@@ -91,6 +92,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
   const [editing, setEditing] = useState<CatalogItem | null>(null)
   const [form, setForm] = useState<CatalogForm>({ name: '', price: '', qty: '1', total: '', description: '', lines: [] })
   const [deleting, setDeleting] = useState<CatalogItem | null>(null)
+  const [fileItem, setFileItem] = useState<CatalogItem | null>(null)
   const toast = useToast()
 
   const canEdit = can(role, 'edit') && can(role, 'editPrices')
@@ -142,16 +144,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
   }
 
   const openEdit = (c: CatalogItem): void => {
-    setEditing(c)
-    setForm({
-      name: c.name,
-      price: String(c.price),
-      qty: String(c.qty && c.qty > 0 ? c.qty : 1),
-      total: c.total && c.total > 0 ? String(c.total) : '',
-      description: c.description,
-      lines: c.materials.map((m) => ({ material_id: m.material_id, qty: m.qty }))
-    })
-    setModal('edit')
+    setFileItem(c)
   }
 
   /** عند تغيير الكمية: نحافظ على الاجمالي ونعيد حساب سعر الوحدة = الاجمالي ÷ الكمية، وإن كان الاجمالي فارغاً نحسبه من سعر الوحدة */
@@ -223,7 +216,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      await window.clinic.catalog.update(Number(key), patch)
+      await window.clinic.catalog.update(String(key), patch)
       load()
     },
     [load]
@@ -255,6 +248,19 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
 
   return (
     <div>
+      {fileItem ? (
+        <CatalogItemFile
+          item={fileItem}
+          rate={rate}
+          role={role}
+          onClose={() => setFileItem(null)}
+          onSaved={() => {
+            load()
+            setFileItem(null)
+          }}
+        />
+      ) : (
+      <>
       <div className="panel">
         <div className="panel-head">
           <h2>كتالوج الأصناف والخدمات</h2>
@@ -292,11 +298,9 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
             emptyText="لا توجد أصناف"
             actions={(c) => (
               <>
-                {canEdit && (
-                  <button className="soft small" onClick={() => openEdit(c)}>
-                    مكونات
-                  </button>
-                )}
+                <button className="soft small" onClick={() => openEdit(c)}>
+                  تعديل
+                </button>
                 {canDelete && (
                   <button className="danger-ghost small" onClick={() => setDeleting(c)}>
                     حذف
@@ -372,9 +376,9 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
                 <div className="series-item" key={i}>
                   <SearchSelect
                     value={l.material_id}
-                    onChange={(v) => setLine(i, { material_id: Number(v) })}
+                    onChange={(v) => setLine(i, { material_id: v })}
                     options={[
-                      { value: 0, label: 'اختر المادة...' },
+                      { value: '', label: 'اختر المادة...' },
                       ...materials.map((mm) => ({ value: mm.id, label: `${mm.name} (متوفر ${mm.quantity})` }))
                     ]}
                   />
@@ -395,7 +399,7 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
             })}
           </div>
           <div className="mt-8">
-            <button className="ghost small" onClick={() => setForm((f) => ({ ...f, lines: [...f.lines, { material_id: 0, qty: 1 }] }))}>
+            <button className="ghost small" onClick={() => setForm((f) => ({ ...f, lines: [...f.lines, { material_id: '', qty: 1 }] }))}>
               + إضافة مادة
             </button>
           </div>
@@ -426,6 +430,8 @@ export default function Catalog({ settings, role }: { settings: Settings | null;
           onConfirm={remove}
           onClose={() => setDeleting(null)}
         />
+      )}
+      </>
       )}
     </div>
   )

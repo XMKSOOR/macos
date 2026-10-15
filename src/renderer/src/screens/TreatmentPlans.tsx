@@ -29,7 +29,7 @@ const FDI_TEETH = [
 ]
 
 interface ItemDraft {
-  id?: number
+  id?: string
   tooth_number: string
   procedure_name: string
   cost: number
@@ -38,14 +38,14 @@ interface ItemDraft {
 
 const emptyItem = (): ItemDraft => ({ tooth_number: '', procedure_name: '', cost: 0, notes: '' })
 
-export default function TreatmentPlans({ patientId, rate }: { patientId: number; rate: number }): React.JSX.Element {
+export default function TreatmentPlans({ patientId, rate }: { patientId: string; rate: number }): React.JSX.Element {
   const toast = useToast()
   const [plans, setPlans] = useState<TreatmentPlan[]>([])
   const [loading, setLoading] = useState(true)
   const [templates, setTemplates] = useState<ProcedureTemplate[]>([])
-  const [planEdit, setPlanEdit] = useState<{ id?: number; title: string; status: TreatmentPlanStatus; notes: string } | null>(null)
+  const [planEdit, setPlanEdit] = useState<{ id?: string; title: string; status: TreatmentPlanStatus; notes: string } | null>(null)
   const [savingPlan, setSavingPlan] = useState(false)
-  const [itemEdit, setItemEdit] = useState<{ planId: number; draft: ItemDraft } | null>(null)
+  const [itemEdit, setItemEdit] = useState<{ planId: string; draft: ItemDraft } | null>(null)
   const [savingItem, setSavingItem] = useState(false)
   const [deletingPlan, setDeletingPlan] = useState<TreatmentPlan | null>(null)
   const [deletingItem, setDeletingItem] = useState<TreatmentPlanItem | null>(null)
@@ -169,7 +169,7 @@ export default function TreatmentPlans({ patientId, rate }: { patientId: number;
   }
 
   const applyTemplate = (value: string): void => {
-    const t = templates.find((x) => x.id === Number(value))
+    const t = templates.find((x) => x.id === value)
     if (!t) return
     setItemEdit((s) => (s ? { ...s, draft: { ...s.draft, procedure_name: t.name, cost: t.default_cost } } : s))
   }

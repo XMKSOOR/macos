@@ -6,8 +6,9 @@ import type { Col } from '../table'
 import ExcelBar, { exportNow } from '../excel'
 import type { Appointment, Patient, Role } from '../lib'
 import { can, today } from '../lib'
+import AppointmentFile from './AppointmentFile'
 
-const cols = (onOpenPatient?: (id: number) => void): Col<Appointment>[] => [
+const cols = (onOpenPatient?: (id: string) => void): Col<Appointment>[] => [
   {
     key: 'patient_name',
     label: 'المريض',
@@ -43,15 +44,15 @@ export default function Appointments({
   onOpenPatient
 }: {
   role: Role
-  onOpenPatient?: (id: number) => void
+  onOpenPatient?: (id: string) => void
 }): React.JSX.Element {
   const [list, setList] = useState<Appointment[]>([])
   const [patients, setPatients] = useState<Patient[]>([])
   const [dateFilter, setDateFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [modal, setModal] = useState(false)
-  const [form, setForm] = useState<{ patient_id: number; date: string; time: string; reason: string; status: Appointment['status']; notes: string }>({
-    patient_id: 0,
+  const [form, setForm] = useState<{ patient_id: string; date: string; time: string; reason: string; status: Appointment['status']; notes: string }>({
+    patient_id: '',
     date: today(),
     time: '',
     reason: '',
@@ -59,6 +60,7 @@ export default function Appointments({
     notes: ''
   })
   const [deleting, setDeleting] = useState<Appointment | null>(null)
+  const [openAppt, setOpenAppt] = useState<Appointment | null>(null)
   const toast = useToast()
 
   const canEdit = can(role, 'edit')
@@ -112,7 +114,7 @@ export default function Appointments({
 
   const onRowSave = useCallback(
     async (key: number | string, patch: Record<string, unknown>): Promise<void> => {
-      await window.clinic.appointments.update(Number(key), patch)
+      await window.clinic.appointments.update(String(key), patch)
       load(dateFilter, statusFilter)
     },
     [load, dateFilter, statusFilter]
@@ -120,36 +122,12 @@ export default function Appointments({
 
   const onImportRows = useCallback(
     async (rows: Record<string, string>[]) => {
-      let ok = 0
-      let skip = 0
-      for (const r of rows) {
-        if (!r.patient_name || !r.date) {
-          skip++
-          continue
-        }
-        const f = patients.find((p) => p.name.trim().toLowerCase() === r.patient_name.trim().toLowerCase())
-        if (!f) {
-          skip++
-          continue
-        }
-        try {
-          await window.clinic.appointments.create({
-            patient_id: f.id,
-            date: r.date,
-            time: r.time ?? '',
-            reason: r.reason ?? '',
-            status: (r.status === 'done' || r.status === 'cancelled' ? r.status : 'scheduled') as Appointment['status'],
-            notes: r.notes ?? ''
-          })
-          ok++
-        } catch {
-          skip++
-        }
-      }
+      // الاستيراد يتم على الخادم مع دمج التكرار (المريض + التاريخ + الوقت)، لا ينشئ صفوفاً مكرّرة
+      const res = await window.clinic.appointments.importRows(rows)
       load(dateFilter, statusFilter)
-      return { ok, skip }
+      return res
     },
-    [patients, load, dateFilter, statusFilter]
+    [load, dateFilter, statusFilter]
   )
 
   const exportRows = (rows: Appointment[] = list): Record<string, string | number>[] =>
@@ -164,6 +142,20 @@ export default function Appointments({
 
   return (
     <div>
+      {openAppt ? (
+        <AppointmentFile
+          appt={openAppt}
+          patients={patients}
+          role={role}
+          onClose={() => setOpenAppt(null)}
+          onSaved={() => {
+            load(dateFilter, statusFilter)
+            setOpenAppt(null)
+          }}
+          onOpenPatient={onOpenPatient}
+        />
+      ) : (
+      <>
       <div className="panel">
         <div className="panel-head">
           <h2>المواعيد</h2>
@@ -180,7 +172,7 @@ export default function Appointments({
               ]}
             />
             <ExcelBar schema="appointments" title="المواعيد" buildRows={exportRows} onImportRows={canImport ? onImportRows : undefined} />
-            <button onClick={() => { setForm({ patient_id: 0, date: today(), time: '', reason: '', status: 'scheduled', notes: '' }); setModal(true) }}>+ موعد جديد</button>
+            <button onClick={() => { setForm({ patient_id: '', date: today(), time: '', reason: '', status: 'scheduled', notes: '' }); setModal(true) }}>+ موعد جديد</button>
           </div>
         </div>
         <div className="panel-body">
@@ -210,6 +202,9 @@ export default function Appointments({
             emptyText="لا توجد مواعيد"
             actions={(a) => (
               <>
+                <button className="soft small" onClick={() => setOpenAppt(a)}>
+                  تعديل
+                </button>
                 {canDelete && (
                   <button className="danger-ghost small" onClick={() => setDeleting(a)}>
                     حذف
@@ -238,9 +233,9 @@ export default function Appointments({
             <Field label="المريض *">
               <SearchSelect
                 value={form.patient_id}
-                onChange={(v) => setForm({ ...form, patient_id: Number(v) })}
+                onChange={(v) => setForm({ ...form, patient_id: v })}
                 options={[
-                  { value: 0, label: 'اختر المريض...' },
+                  { value: '', label: 'اختر المريض...' },
                   ...patients.map((p) => ({ value: p.id, label: `${p.name}${p.phone ? ` (${p.phone})` : ''}` }))
                 ]}
               />
@@ -268,6 +263,8 @@ export default function Appointments({
           onConfirm={remove}
           onClose={() => setDeleting(null)}
         />
+      )}
+      </>
       )}
     </div>
   )
