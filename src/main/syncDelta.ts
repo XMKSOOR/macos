@@ -48,6 +48,16 @@ export function clearAllBaselines(): void {
   }
 }
 
+/** يمحو بصمات المزامنة لناقل واحد فقط (مثل cloud) دون التأثير على النواقل الأخرى. */
+export function clearBaselines(transport: string): void {
+  ensureDeltaTable()
+  try {
+    getDb().prepare(`DELETE FROM \`${META}\` WHERE transport=?`).run(transport)
+  } catch {
+    /* ignore */
+  }
+}
+
 /** اسم عمود المفتاح الأساسي للجدول (id تقريباً للكل، key لجدول الإعدادات) */
 export function pkColumn(tbl: string): string {
   assertSafeName(tbl)

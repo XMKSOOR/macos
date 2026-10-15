@@ -123,7 +123,7 @@ import { can } from '../shared/types'
 import { backupDatabase, getDbPath, recalcUsd, replaceDbFrom } from './db'
 import { mysqlConfig, mysqlPull, mysqlPush, mysqlTest } from './mysql'
 import { supabaseConfig, supabasePull, supabasePush, supabaseTest } from './supabase'
-import { cloudPull, cloudPush, cloudTest } from './cloud'
+import { cloudPull, cloudPush, cloudTest, cloudRebuild } from './cloud'
 import { markDirty, resetSyncForRestore } from './autoSync'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
@@ -898,6 +898,10 @@ export function registerIpc(ipc: IpcMain): void {
   handle('cloud:pull', async () => {
     requireAuth('manageSettings')
     return cloudPull()
+  })
+  handle('cloud:rebuild', async () => {
+    requireAuth('manageSettings')
+    return cloudRebuild()
   })
   handle('cloud:config', () => !!supabaseConfig())
 }

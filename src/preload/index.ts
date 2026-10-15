@@ -233,6 +233,7 @@ records: {
     test: (): Promise<string> => invoke('cloud:test'),
     push: (): Promise<string> => invoke('cloud:push'),
     pull: (): Promise<string> => invoke('cloud:pull'),
+    rebuild: (): Promise<string> => invoke('cloud:rebuild'),
     config: (): Promise<boolean> => invoke('cloud:config')
   }
 }

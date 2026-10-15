@@ -243,6 +243,47 @@ export default function SettingsScreen({
 
       <div className="panel">
         <div className="panel-head">
+          <h2>المزامنة السحابية (Supabase Postgres)</h2>
+        </div>
+        <div className="panel-body">
+          <div className="toolbar">
+            <button
+              className="ghost"
+              onClick={() => {
+                setBusy('cloudTest')
+                window.clinic.cloud
+                  .test()
+                  .then((m) => toast(m, 'success'))
+                  .catch((e) => toast(e.message, 'error'))
+                  .finally(() => setBusy(''))
+              }}
+              disabled={busy === 'cloudTest'}
+            >
+              📡 اختبار الاتصال
+            </button>
+            <button
+              className="soft"
+              onClick={() => {
+                setBusy('cloudRebuild')
+                window.clinic.cloud
+                  .rebuild()
+                  .then((m) => toast(m, 'success'))
+                  .catch((e) => toast(e.message, 'error'))
+                  .finally(() => setBusy(''))
+              }}
+              disabled={busy === 'cloudRebuild'}
+            >
+              🔧 إصلاح/إعادة بناء المزامنة السحابية
+            </button>
+          </div>
+          <p className="muted mt-8" style={{ fontSize: 12 }}>
+            استخدم «إصلاح» فقط بعد تنفيذ supabase/reset.sql ثم supabase/schema.sql على مشروع Supabase، وعندما تكون قاعدة هذا الجهاز هي المصدر الكامل للبيانات. يصفّر بصمات الرفع ويرفع نسخة كاملة إلى السحابة.
+          </p>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
           <h2>تغيير كلمة المرور</h2>
         </div>
         <div className="panel-body">

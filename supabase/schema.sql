@@ -114,7 +114,7 @@ create table if not exists public.invoice_items (
 
 create table if not exists public.invoice_materials (
   id          uuid primary key default gen_random_uuid(),
-  invoice_id  bigint not null references public.invoices(id) on delete cascade,
+  invoice_id  uuid not null references public.invoices(id) on delete cascade,
   item_id     uuid,
   material_id uuid not null references public.materials(id),
   qty         double precision not null default 0
@@ -153,7 +153,7 @@ create table if not exists public.settings (
 
 create table if not exists public.patient_files (
   id          uuid primary key default gen_random_uuid(),
-  patient_id  bigint not null references public.patients(id) on delete cascade,
+  patient_id  uuid not null references public.patients(id) on delete cascade,
   filename    text not null default '',
   stored_name text not null default '',
   ftype       text not null default 'other',
@@ -164,7 +164,7 @@ create table if not exists public.patient_files (
 
 create table if not exists public.patient_medications (
   id                  uuid primary key default gen_random_uuid(),
-  patient_id          bigint not null references public.patients(id) on delete cascade,
+  patient_id          uuid not null references public.patients(id) on delete cascade,
   scientific_name     text not null default '',
   trade_name          text not null default '',
   dose                text not null default '',
@@ -202,7 +202,7 @@ create table if not exists public.medicines (
 -- ---------------------------------------------------------------------
 create table if not exists public.dental_charts (
   id           uuid primary key default gen_random_uuid(),
-  patient_id   bigint not null references public.patients(id) on delete cascade,
+  patient_id   uuid not null references public.patients(id) on delete cascade,
   tooth_number text not null,
   condition    text not null default 'healthy',
   surfaces     text not null default '',
@@ -235,7 +235,7 @@ create table if not exists public.treatment_plan_items (
 
 create table if not exists public.periodontal_charts (
   id           uuid primary key default gen_random_uuid(),
-  patient_id   bigint not null references public.patients(id) on delete cascade,
+  patient_id   uuid not null references public.patients(id) on delete cascade,
   tooth_number text not null,
   pocket_depth bigint not null default 0,
   bleeding     bigint not null default 0,
@@ -247,7 +247,7 @@ create table if not exists public.periodontal_charts (
 
 create table if not exists public.recall_reminders (
   id          uuid primary key default gen_random_uuid(),
-  patient_id  bigint not null references public.patients(id) on delete cascade,
+  patient_id  uuid not null references public.patients(id) on delete cascade,
   recall_type text not null default 'checkup',
   due_date    text not null default '',
   status      text not null default 'pending',
@@ -257,7 +257,7 @@ create table if not exists public.recall_reminders (
 
 create table if not exists public.tooth_history (
   id             uuid primary key default gen_random_uuid(),
-  patient_id     bigint not null references public.patients(id) on delete cascade,
+  patient_id     uuid not null references public.patients(id) on delete cascade,
   tooth_number   text not null default '',
   date           text not null default '',
   procedure_name text not null default '',
@@ -268,7 +268,7 @@ create table if not exists public.tooth_history (
 
 create table if not exists public.anesthesia_records (
   id              uuid primary key default gen_random_uuid(),
-  patient_id      bigint not null references public.patients(id) on delete cascade,
+  patient_id      uuid not null references public.patients(id) on delete cascade,
   date            text not null default '',
   tooth_number    text not null default '',
   anesthesia_type text not null default '',
@@ -281,7 +281,7 @@ create table if not exists public.anesthesia_records (
 
 create table if not exists public.lab_cases (
   id            uuid primary key default gen_random_uuid(),
-  patient_id    bigint not null references public.patients(id) on delete cascade,
+  patient_id    uuid not null references public.patients(id) on delete cascade,
   date          text not null default '',
   lab_name      text not null default '',
   case_type     text not null default '',
@@ -298,7 +298,7 @@ create table if not exists public.lab_cases (
 
 create table if not exists public.implant_records (
   id             uuid primary key default gen_random_uuid(),
-  patient_id     bigint not null references public.patients(id) on delete cascade,
+  patient_id     uuid not null references public.patients(id) on delete cascade,
   tooth_number   text not null default '',
   date           text not null default '',
   brand          text not null default '',
@@ -311,7 +311,7 @@ create table if not exists public.implant_records (
 
 create table if not exists public.consent_forms (
   id             uuid primary key default gen_random_uuid(),
-  patient_id     bigint not null references public.patients(id) on delete cascade,
+  patient_id     uuid not null references public.patients(id) on delete cascade,
   date           text not null default '',
   procedure_name text not null default '',
   content        text not null default '',
@@ -322,7 +322,7 @@ create table if not exists public.consent_forms (
 
 create table if not exists public.risk_assessments (
   id              uuid primary key default gen_random_uuid(),
-  patient_id      bigint not null references public.patients(id) on delete cascade,
+  patient_id      uuid not null references public.patients(id) on delete cascade,
   date            text not null default '',
   caries_risk     text not null default '',
   perio_risk      text not null default '',

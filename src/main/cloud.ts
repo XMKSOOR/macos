@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { getDb } from './db'
 import { supabaseConfig } from './supabase'
 import { fingerprintTables } from './syncCore'
-import { planPush, saveBaseline, mergeIntoLocal, pkColumn } from './syncDelta'
+import { planPush, saveBaseline, mergeIntoLocal, pkColumn, clearBaselines } from './syncDelta'
 
 // الجداول المركّبة كاملة (نسخة معكوسة) على Supabase Postgres
 const SYNC_TABLES: string[] = [
@@ -405,6 +405,25 @@ export async function cloudPush(): Promise<string> {
   }
   console.log(`[SYNC:cloud] push انتهى: ${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً`)
   return `تم رفع التعديلات إلى Supabase Postgres (${pushed} صفاً محدثاً، ${removed} صفاً محذوفاً)`
+}
+
+/**
+ * إصلاح/إعادة بناء المزامنة السحابية: يصفّر بصمات ناقل السحابة وحالة المزامنة ثم يرفع نسخة
+ * كاملة من هذا الجهاز. يُستعمل بعد إعادة إنشاء مخطط Supabase (reset.sql + schema.sql) لضمان
+ * رفع كل الصفوف من جديد بدل الاعتماد على بصمات قديمة.
+ */
+export async function cloudRebuild(): Promise<string> {
+  const cfg = cloudConfig()
+  if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
+  console.log('[SYNC:cloud] rebuild: تصفير البصمات والحالة ثم رفع كامل من هذا الجهاز')
+  clearBaselines(TRANSPORT)
+  try {
+    getDb().prepare("DELETE FROM settings WHERE key = 'sync_state_cloud'").run()
+  } catch {
+    /* ignore */
+  }
+  const msg = await cloudPush()
+  return 'تمت إعادة بناء المزامنة السحابية — ' + msg
 }
 
 /**

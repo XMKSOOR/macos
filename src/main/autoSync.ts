@@ -213,6 +213,19 @@ async function runUnit(u: SyncUnit): Promise<'push' | 'pull' | 'none' | 'error'>
   const local = fingerprintDb()
   const state = readSyncState(u.id)
 
+  // أمان: البعيد الفارغ (لا نسخة) يعني «لا شيء على السحابة» — نبنيه بالرفع ولا ندمج نسخة
+  // فارغة في المحلي، وإلّا لحذف الدمج الصفوف المحلية غير المتغيّرة (كارثة بعد إعادة إنشاء المخطط).
+  if (!remote) {
+    const res = await withTimeout(u.push(), UNIT_TIMEOUT_MS)
+    if (res === TIMEOUT) {
+      logUnit(u, `مهلة push (${UNIT_TIMEOUT_MS}ms) انتهت (لا نسخة بعيدة)`)
+      return 'error'
+    }
+    storeState(u.id, local.hash, local.rows)
+    logUnit(u, 'لا نسخة بعيدة — رُفع المحلي لبناء السحابة ✓')
+    return 'push'
+  }
+
   // مزامنة ثنائية الاتجاه للنقلات القائمة (Postgres/MySQL): تنتقل التعديلات والحذوفات
   // في الاتجاهين معاً بدل «رفع أو سحب» الذي كان يُلغي تعديل أحد الجهازين.
   if (u.sync && state && state.lastSyncAt) {
