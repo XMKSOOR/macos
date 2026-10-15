@@ -1759,6 +1759,9 @@ export function createInvoice(input: {
   user_name: string
 }): InvoiceWithItems {
   const invoice_no = nextInvoiceNo()
+  const patientName =
+    (db.prepare('SELECT name FROM patients WHERE id=?').get(input.patient_id) as unknown as { name?: string } | undefined)
+      ?.name ?? ''
   const subtotal = input.items.reduce((s, it) => s + it.cost * it.qty, 0)
   const total = Math.max(0, subtotal - input.discount)
   const R = (n: number): number => (input.usd_rate > 0 ? Math.round((n / input.usd_rate) * 100) / 100 : 0)
@@ -1801,7 +1804,14 @@ export function createInvoice(input: {
       }
       for (const m of mats ?? []) {
         insMat.run(invoiceId, itemId, m.material_id, m.qty)
-        adjustStock(m.material_id, -m.qty, 'sale', invoice_no, input.user_name, it.name)
+        adjustStock(
+          m.material_id,
+          -m.qty,
+          'sale',
+          invoice_no,
+          input.user_name,
+          patientName ? `${it.name} — المريض: ${patientName}` : it.name
+        )
       }
     }
     db.prepare('COMMIT').run()

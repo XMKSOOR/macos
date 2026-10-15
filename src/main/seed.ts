@@ -132,8 +132,8 @@ export function upgradePricesToStudy(): void {
   }
 }
 
-/** حذف التكرار في كتالوج الأصناف: إبقاء أحدث صف لكل اسم (created_at ثم id) وحذف صفوف الربط المكرّرة.
- *  عملية آمنة وقابلة للتكرار — لا تحذف أصنافاً ذات اسم فريد. */
+/** حذف التكرار في كتالوج الأصناف: إبقاء صف واحد لكل اسم (مع ترحيل مواد BOM إليه) وحذف صفوف الربط المكرّرة.
+ *  يُفضّل الإبقاء على الصف الذي يملك مواد، ثم الأحدث (created_at ثم id). عملية آمنة وقابلة للتكرار. */
 export function dedupeCatalog(): void {
   const db = getDb()
   try {
@@ -141,21 +141,49 @@ export function dedupeCatalog(): void {
       id: number
       name: string
     }[]
-    const seen = new Set<string>()
-    const drop: number[] = []
+    const bomCount = new Map<number, number>()
+    for (const b of db
+      .prepare('SELECT catalog_id, COUNT(*) AS c FROM catalog_materials GROUP BY catalog_id')
+      .all() as unknown as { catalog_id: number; c: number }[]) {
+      bomCount.set(b.catalog_id, Number(b.c))
+    }
+    const groups = new Map<string, number[]>()
     for (const r of rows) {
-      if (seen.has(r.name)) drop.push(r.id)
-      else seen.add(r.name)
+      const key = (r.name ?? '').trim()
+      const arr = groups.get(key)
+      if (arr) arr.push(r.id)
+      else groups.set(key, [r.id])
+    }
+    const drop: number[] = []
+    const moves: { from: number; to: number }[] = []
+    const rename: { id: number; name: string }[] = []
+    for (const [name, ids] of groups) {
+      if (ids.length === 1) continue
+      const survivor = ids.find((id) => (bomCount.get(id) ?? 0) > 0) ?? ids[0]
+      for (const id of ids) {
+        if (id === survivor) continue
+        drop.push(id)
+        if ((bomCount.get(id) ?? 0) > 0) moves.push({ from: id, to: survivor })
+      }
+      rename.push({ id: survivor, name })
     }
     if (drop.length === 0) return
     db.prepare('BEGIN').run()
     try {
+      const getBom = db.prepare('SELECT material_id, qty FROM catalog_materials WHERE catalog_id=?')
+      const insBom = db.prepare('INSERT INTO catalog_materials (catalog_id, material_id, qty) VALUES (?,?,?)')
       const delBom = db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?')
       const delCat = db.prepare('DELETE FROM catalog WHERE id=?')
+      const setName = db.prepare('UPDATE catalog SET name=? WHERE id=?')
+      for (const m of moves) {
+        const links = getBom.all(m.from) as unknown as { material_id: number; qty: number }[]
+        for (const l of links) insBom.run(m.to, l.material_id, l.qty)
+      }
       for (const id of drop) {
         delBom.run(id)
         delCat.run(id)
       }
+      for (const r of rename) setName.run(r.name, r.id)
       db.prepare(
         'DELETE FROM catalog_materials WHERE rowid NOT IN (SELECT MIN(rowid) FROM catalog_materials GROUP BY catalog_id, material_id)'
       ).run()

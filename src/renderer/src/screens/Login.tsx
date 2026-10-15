@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useToast } from '../ui'
 import type { User } from '../lib'
+import logo from '../assets/logo.png'
 
 export default function Login({ onLogin }: { onLogin: (u: User) => void }): React.JSX.Element {
   const [username, setUsername] = useState('')
@@ -26,7 +27,7 @@ export default function Login({ onLogin }: { onLogin: (u: User) => void }): Reac
   return (
     <div className="login-screen">
       <div className="login-box">
-        <div className="logo-big">🦷</div>
+        <img className="logo-big" src={logo} alt="شعار العيادة" />
         <h1>نظام إدارة عيادة الأسنان</h1>
         <p>تسجيل الدخول للمتابعة</p>
         {error && <div className="error">{error}</div>}

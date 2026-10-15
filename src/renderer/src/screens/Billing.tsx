@@ -150,6 +150,7 @@ export default function Billing({
             <table className="data">
               <thead>
                 <tr>
+                  <th>ID</th>
                   <th>الرقم</th>
                   <th>المريض</th>
                   <th>التاريخ</th>
@@ -163,7 +164,7 @@ export default function Billing({
               <tbody>
                 {list.length === 0 ? (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <Empty text="لا توجد فواتير" />
                     </td>
                   </tr>
@@ -172,6 +173,7 @@ export default function Billing({
                     const remaining = inv.total - inv.paid
                     return (
                       <tr key={inv.id}>
+                        <td className="id-col">{inv.id}</td>
                         <td style={{ fontWeight: 700 }}>#{inv.invoice_no}</td>
                         <td>
                           {inv.patient_id && onOpenPatient ? (

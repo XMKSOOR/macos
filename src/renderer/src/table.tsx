@@ -456,6 +456,7 @@ export default function DataGrid<T>({
   // من التمرير أفقياً بدل ضغط الأعمدة وإخفاء محتواها على الشاشات الضيّقة.
   const minTableWidth =
     (selectable ? 38 : 0) +
+    56 +
     cols.reduce((sum, c) => sum + (c.width ?? 130), 0) +
     (actions ? 190 : 0)
 
@@ -477,6 +478,9 @@ export default function DataGrid<T>({
                   <input ref={headRef} type="checkbox" checked={allSelected} onChange={toggleAll} title="تحديد الكل" aria-label="تحديد الكل" />
                 </th>
               )}
+              <th className="id-col" style={{ width: 56 }}>
+                ID
+              </th>
               {cols.map((c) => (
                 <th key={c.key} style={c.width ? { width: c.width } : undefined}>
                   {c.label}
@@ -488,7 +492,7 @@ export default function DataGrid<T>({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={cols.length + (actions ? 1 : 0) + (selectable ? 1 : 0)}>
+                <td colSpan={cols.length + (actions ? 1 : 0) + (selectable ? 1 : 0) + 1}>
                   <Empty text={emptyText ?? 'لا توجد بيانات'} />
                 </td>
               </tr>
@@ -520,6 +524,7 @@ export default function DataGrid<T>({
                         />
                       </td>
                     )}
+                    <td className="id-col">{keyOf(row)}</td>
                     {cols.map((c) => (
                       <td key={c.key}>
                         {editing && editableKeys.includes(c.key) ? (

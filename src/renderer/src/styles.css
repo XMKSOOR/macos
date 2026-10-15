@@ -159,7 +159,21 @@ label {
 }
 
 .sidebar .brand .logo {
-  font-size: 20px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  object-fit: contain;
+  background: #fff;
+  padding: 2px;
+}
+
+.sidebar .mini-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: contain;
+  background: #fff;
+  padding: 1px;
 }
 
 .sidebar nav {
@@ -339,6 +353,15 @@ label {
   height: 16px;
   cursor: pointer;
   accent-color: var(--accent, #2563eb);
+}
+
+.id-col {
+  width: 56px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .bulk-bar {
@@ -779,7 +802,13 @@ div.row-actions {
 }
 
 .login-box .logo-big {
-  font-size: 42px;
+  width: 108px;
+  height: 108px;
+  border-radius: 18px;
+  object-fit: contain;
+  background: #fff;
+  padding: 6px;
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.12));
 }
 
 .login-box h1 {

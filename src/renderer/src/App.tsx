@@ -14,6 +14,7 @@ import Finances from './screens/Finances'
 import Dental from './screens/Dental'
 import type { ScreenKey, Settings, User } from './lib'
 import { setCurrentPerms, toLatinDigits } from './lib'
+import logo from './assets/logo.png'
 
 const NAV: { key: ScreenKey; label: string; icon: string; adminOnly?: boolean }[] = [
   { key: 'dashboard', label: 'لوحة التحكم', icon: '📊' },
@@ -134,7 +135,7 @@ export default function App(): React.JSX.Element {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="logo">🦷</span>
+          <img className="logo" src={logo} alt="شعار العيادة" />
           <span>{settings?.clinic_name || 'نظام العيادة'}</span>
         </div>
         <nav>
@@ -144,7 +145,11 @@ export default function App(): React.JSX.Element {
               className={`nav-item ${screen === n.key ? 'active' : ''}`}
               onClick={() => setScreen(n.key)}
             >
-              <span className="mini-icon">{n.icon}</span>
+              {n.key === 'dental' ? (
+                <img className="mini-icon mini-logo" src={logo} alt="" />
+              ) : (
+                <span className="mini-icon">{n.icon}</span>
+              )}
               <span>{n.label}</span>
             </button>
           ))}
