@@ -49,9 +49,9 @@ create table if not exists public.appointments (
 create table if not exists public.catalog (
   id          uuid primary key default gen_random_uuid(),
   name        text not null,
-  price       bigint not null default 0,
+  price       double precision not null default 0,
   qty         double precision not null default 1,
-  total       bigint not null default 0,
+  total       double precision not null default 0,
   description text not null default '',
   price_usd   double precision not null default 0,
   cost_usd    double precision not null default 0,
@@ -66,9 +66,9 @@ create table if not exists public.materials (
   unit       text not null default '',
   quantity   double precision not null default 0,
   min_qty    double precision not null default 0,
-  cost       bigint not null default 0,
+  cost       double precision not null default 0,
   cost_usd   double precision not null default 0,
-  total      bigint not null default 0,
+  total      double precision not null default 0,
   total_usd  double precision not null default 0,
   supplier   text not null default '',
   notes      text not null default '',
@@ -88,10 +88,10 @@ create table if not exists public.invoices (
   patient_id uuid not null references public.patients(id),
   date       text not null default '',
   usd_rate   double precision not null default 0,
-  subtotal   bigint not null default 0,
-  discount   bigint not null default 0,
-  total      bigint not null default 0,
-  paid       bigint not null default 0,
+  subtotal   double precision not null default 0,
+  discount   double precision not null default 0,
+  total      double precision not null default 0,
+  paid       double precision not null default 0,
   subtotal_usd double precision not null default 0,
   discount_usd double precision not null default 0,
   total_usd  double precision not null default 0,
@@ -106,8 +106,8 @@ create table if not exists public.invoice_items (
   id         uuid primary key default gen_random_uuid(),
   invoice_id uuid not null references public.invoices(id) on delete cascade,
   name       text not null default '',
-  cost       bigint not null default 0,
-  qty        bigint not null default 1,
+  cost       double precision not null default 0,
+  qty        double precision not null default 1,
   cost_usd   double precision not null default 0,
   catalog_id uuid
 );
@@ -134,7 +134,7 @@ create table if not exists public.stock_movements (
 create table if not exists public.expenses (
   id         uuid primary key default gen_random_uuid(),
   category   text not null default '',
-  amount     bigint not null default 0,
+  amount     double precision not null default 0,
   amount_usd double precision not null default 0,
   is_recurring integer not null default 0,
   recurrence text not null default 'monthly',
@@ -158,7 +158,7 @@ create table if not exists public.patient_files (
   stored_name text not null default '',
   ftype       text not null default 'other',
   mime        text not null default '',
-  size        bigint not null default 0,
+  size        double precision not null default 0,
   created_at  text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -216,7 +216,7 @@ create table if not exists public.treatment_plans (
   patient_id uuid not null references public.patients(id) on delete cascade,
   title      text not null,
   status     text not null default 'proposed',
-  total_cost bigint not null default 0,
+  total_cost double precision not null default 0,
   notes      text not null default '',
   created_at text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
   updated_at text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
@@ -227,20 +227,20 @@ create table if not exists public.treatment_plan_items (
   plan_id uuid not null references public.treatment_plans(id) on delete cascade,
   tooth_number   text not null default '',
   procedure_name text not null,
-  cost           bigint not null default 0,
+  cost           double precision not null default 0,
   status         text not null default 'pending',
   notes          text not null default '',
-  sort_order     bigint not null default 0
+  sort_order     double precision not null default 0
 );
 
 create table if not exists public.periodontal_charts (
   id           uuid primary key default gen_random_uuid(),
   patient_id   uuid not null references public.patients(id) on delete cascade,
   tooth_number text not null,
-  pocket_depth bigint not null default 0,
-  bleeding     bigint not null default 0,
-  mobility     bigint not null default 0,
-  recession    bigint not null default 0,
+  pocket_depth double precision not null default 0,
+  bleeding     double precision not null default 0,
+  mobility     double precision not null default 0,
+  recession    double precision not null default 0,
   notes        text not null default '',
   created_at   text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
@@ -291,7 +291,7 @@ create table if not exists public.lab_cases (
   status        text not null default '',
   due_date      text not null default '',
   received_date text not null default '',
-  cost          bigint not null default 0,
+  cost          double precision not null default 0,
   notes         text not null default '',
   created_at    text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
@@ -349,7 +349,7 @@ create table if not exists public.procedure_templates (
   name         text not null,
   category     text not null default '',
   description  text not null default '',
-  default_cost bigint not null default 0,
+  default_cost double precision not null default 0,
   materials    text not null default '',
   created_at   text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
@@ -359,7 +359,7 @@ create table if not exists public.insurance_fees (
   code           text not null default '',
   procedure_name text not null default '',
   category       text not null default '',
-  fee            bigint not null default 0,
+  fee            double precision not null default 0,
   notes          text not null default '',
   created_at     text not null default to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
@@ -410,10 +410,10 @@ alter table public.users     add column if not exists permissions      text not 
 alter table public.catalog   add column if not exists price_usd        double precision not null default 0;
 alter table public.catalog   add column if not exists cost_usd         double precision not null default 0;
 alter table public.catalog   add column if not exists qty              double precision not null default 1;
-alter table public.catalog   add column if not exists total            bigint not null default 0;
+alter table public.catalog   add column if not exists total            double precision not null default 0;
 alter table public.catalog   add column if not exists total_usd        double precision not null default 0;
 alter table public.materials add column if not exists cost_usd         double precision not null default 0;
-alter table public.materials add column if not exists total            bigint not null default 0;
+alter table public.materials add column if not exists total            double precision not null default 0;
 alter table public.materials add column if not exists total_usd        double precision not null default 0;
 alter table public.invoices  add column if not exists subtotal_usd     double precision not null default 0;
 alter table public.invoices  add column if not exists discount_usd     double precision not null default 0;
