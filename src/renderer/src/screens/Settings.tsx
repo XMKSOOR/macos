@@ -67,6 +67,36 @@ export default function SettingsScreen({
       .finally(() => setBusy(''))
   }
 
+  const testCloud = (): void => {
+    setBusy('cloudTest')
+    window.clinic.cloud
+      .test()
+      .then((m) => toast(m, 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const sendCloud = (): void => {
+    setBusy('cloudSend')
+    window.clinic.cloud
+      .push()
+      .then((m) => toast(m, 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const receiveCloud = (): void => {
+    setBusy('cloudRecv')
+    window.clinic.cloud
+      .pull()
+      .then((m) => {
+        toast(m, 'success')
+        onSaved()
+      })
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
   const changePassword = (): void => {
     if (!ob.oldPassword || !ob.newPassword) {
       toast('أدخل كلمة المرور الحالية والجديدة', 'error')
@@ -243,41 +273,58 @@ export default function SettingsScreen({
 
       <div className="panel">
         <div className="panel-head">
-          <h2>المزامنة السحابية (Supabase Postgres)</h2>
+          <h2>المزامنة (إرسال واستلام النسخ)</h2>
         </div>
         <div className="panel-body">
-          <div className="toolbar">
-            <button
-              className="ghost"
-              onClick={() => {
-                setBusy('cloudTest')
-                window.clinic.cloud
-                  .test()
-                  .then((m) => toast(m, 'success'))
-                  .catch((e) => toast(e.message, 'error'))
-                  .finally(() => setBusy(''))
-              }}
-              disabled={busy === 'cloudTest'}
-            >
+          <div className="form-grid">
+            <Field label="رابط مشروع Supabase">
+              <input
+                dir="ltr"
+                value={form.supabase_url}
+                onChange={(e) => setForm({ ...form, supabase_url: e.target.value })}
+                placeholder="https://xxxx.supabase.co"
+              />
+            </Field>
+            <Field label="المفتاح السري (Supabase Secret)">
+              <input
+                type="password"
+                dir="ltr"
+                value={form.supabase_key}
+                onChange={(e) => setForm({ ...form, supabase_key: e.target.value })}
+                placeholder="sb_secret_..."
+              />
+            </Field>
+          </div>
+          <label className="inline-check mt-8">
+            <input
+              type="checkbox"
+              checked={(form.supabase_pg_auto ?? '0') === '1'}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  supabase_pg_auto: e.target.checked ? '1' : '0',
+                  supabase_auto: e.target.checked ? '1' : '0'
+                })
+              }
+            />
+            مزامنة تلقائية (إرسال واستلام) بعد كل تعديل، وكل دقيقة، وعند التشغيل والإغلاق
+          </label>
+          <div className="toolbar mt-16">
+            <button onClick={saveGeneral} disabled={busy === 'general'}>
+              حفظ إعدادات المزامنة
+            </button>
+            <button className="ghost" onClick={testCloud} disabled={busy === 'cloudTest'}>
               📡 اختبار الاتصال
             </button>
-            <button
-              className="soft"
-              onClick={() => {
-                setBusy('cloudRebuild')
-                window.clinic.cloud
-                  .rebuild()
-                  .then((m) => toast(m, 'success'))
-                  .catch((e) => toast(e.message, 'error'))
-                  .finally(() => setBusy(''))
-              }}
-              disabled={busy === 'cloudRebuild'}
-            >
-              🔧 إصلاح/إعادة بناء المزامنة السحابية
+            <button className="soft" onClick={sendCloud} disabled={busy === 'cloudSend'}>
+              ⬆ إرسال النسخة (رفع إلى السحابة)
+            </button>
+            <button className="soft" onClick={receiveCloud} disabled={busy === 'cloudRecv'}>
+              ⬇ استلام النسخة (سحب من السحابة)
             </button>
           </div>
           <p className="muted mt-8" style={{ fontSize: 12 }}>
-            استخدم «إصلاح» فقط بعد تنفيذ supabase/reset.sql ثم supabase/schema.sql على مشروع Supabase، وعندما تكون قاعدة هذا الجهاز هي المصدر الكامل للبيانات. يصفّر بصمات الرفع ويرفع نسخة كاملة إلى السحابة.
+            «إرسال» يرفع بيانات هذا الجهاز إلى السحابة، و«استلام» ينزّل بيانات السحابة إلى هذا الجهاز. المزامنة التلقائية تُبقي الأجهزة متطابقة.
           </p>
         </div>
       </div>
