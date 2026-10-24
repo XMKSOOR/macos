@@ -1,116 +1,8 @@
 import { createHash } from 'node:crypto'
 import { getDb } from './db'
 import { supabaseConfig } from './supabase'
-import { fingerprintTables } from './syncCore'
+import { fingerprintTables, DELETE_ORDER, INSERT_ORDER, SYNC_TABLES, runExclusive } from './syncCore'
 import { planPush, saveBaseline, mergeIntoLocal, pkColumn, clearBaselines } from './syncDelta'
-
-// الجداول المركّبة كاملة (نسخة معكوسة) على Supabase Postgres
-const SYNC_TABLES: string[] = [
-  'users',
-  'patients',
-  'patient_medications',
-  'medicines',
-  'materials',
-  'catalog',
-  'catalog_materials',
-  'appointments',
-  'invoices',
-  'invoice_items',
-  'invoice_materials',
-  'stock_movements',
-  'expenses',
-  'dental_charts',
-  'treatment_plans',
-  'treatment_plan_items',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
-
-// ترتيب الحذف على الخادم (الأبناء أولاً لاحترام المفاتيح الأجنبية)
-const DELETE_ORDER: string[] = [
-  'treatment_plan_items',
-  'treatment_plans',
-  'invoice_materials',
-  'invoice_items',
-  'invoices',
-  'appointments',
-  'catalog_materials',
-  'stock_movements',
-  'catalog',
-  'materials',
-  'expenses',
-  'patient_medications',
-  'dental_charts',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'medicines',
-  'patients',
-  'users',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
-
-// ترتيب الإدخال (الآباء أولاً)
-const INSERT_ORDER: string[] = [
-  'users',
-  'patients',
-  'patient_medications',
-  'medicines',
-  'materials',
-  'catalog',
-  'catalog_materials',
-  'appointments',
-  'invoices',
-  'invoice_items',
-  'invoice_materials',
-  'stock_movements',
-  'expenses',
-  'treatment_plans',
-  'treatment_plan_items',
-  'dental_charts',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
 
 const TRANSPORT = 'cloud'
 
@@ -224,6 +116,24 @@ async function cheapRemoteDigest(
   } catch {
     return null
   }
+}
+
+/** يفحص إن كانت قاعدة Postgres البعيدة فارغة تماماً (لم تُبذَر بعد) — عندها نُصفّر البصمات
+ *  ليرفع هذا الجهاز نسخته كاملة بدل أن تتوهّم المزامنة أن صفوفه «مزامَنة» فتبقى السحابة فارغة. */
+async function remoteLooksEmpty(cfg: CloudConfig): Promise<boolean> {
+  const digests = await cheapRemoteDigest(cfg)
+  if (digests) return digests.every((d) => d.cnt === 0)
+  for (const t of SYNC_TABLES) {
+    try {
+      const res = await request(cfg, `/${t}?select=id&limit=1`)
+      if (!res.ok) return false
+      const rows = (await res.json()) as unknown[]
+      if (Array.isArray(rows) && rows.length > 0) return false
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 export async function cloudRemoteFp(): Promise<{ hash: string; rows: number } | null> {
@@ -380,9 +290,18 @@ async function purgeRemoteMetaSettings(cfg: CloudConfig): Promise<void> {
 }
 
 export async function cloudPush(): Promise<string> {
+  return runExclusive(TRANSPORT, () => cloudPushUnlocked())
+}
+
+async function cloudPushUnlocked(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
   console.log(`[SYNC:cloud] push يبدأ (المفتاح: ${maskedKey()}, الرابط: ${cfg.rest})`)
+
+  if (await remoteLooksEmpty(cfg)) {
+    console.log('[SYNC:cloud] push: السحابة فارغة — تصفير البصمات لرفع نسخة كاملة من هذا الجهاز')
+    clearBaselines(TRANSPORT)
+  }
 
   const plans = capturePlans()
   const { pushed, removed, bad } = await pushPlans(cfg, plans)
@@ -432,8 +351,18 @@ export async function cloudRebuild(): Promise<string> {
  * تُعيد عدد الصفوف التي غيّرها السحب.
  */
 export async function cloudSync(): Promise<number> {
+  return runExclusive(TRANSPORT, () => cloudSyncUnlocked())
+}
+
+async function cloudSyncUnlocked(): Promise<number> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
+
+  // السحابة فارغة تماماً (مشروع جديد) → ارفع نسخة كاملة من هذا الجهاز بدل الاعتماد على بصمات البذر
+  if (await remoteLooksEmpty(cfg)) {
+    console.log('[SYNC:cloud] sync: السحابة فارغة — تصفير البصمات لرفع نسخة كاملة من هذا الجهاز')
+    clearBaselines(TRANSPORT)
+  }
 
   // 1) التقط تغييرات المحلي قبل أي دمج
   const plans = capturePlans()
@@ -482,6 +411,10 @@ async function fetchTable(cfg: CloudConfig, t: string): Promise<Record<string, u
 }
 
 export async function cloudPull(): Promise<string> {
+  return runExclusive(TRANSPORT, () => cloudPullUnlocked())
+}
+
+async function cloudPullUnlocked(): Promise<string> {
   const cfg = cloudConfig()
   if (!cfg) throw new Error('أدخل عنوان مشروع Supabase والمفتاح السري في الإعدادات أولاً')
 
@@ -502,11 +435,9 @@ export async function cloudPull(): Promise<string> {
   if (failed.length > 0) {
     console.warn(`[SYNC:cloud] pull: تجاوزت ${failed.length} جدولاً تعذّر جلبها: ${failed.join(', ')}`)
   }
-  if (total === 0 && failed.length === SYNC_TABLES.length) {
-    throw new Error('لا توجد بيانات على Supabase بعد — ارفع نسخة أولاً')
-  }
   if (total === 0) {
-    console.log('[SYNC:cloud] pull: جميع الجداول فارغة على السحابة — قسم فقط من الصفوف المتزامنة سيُحذف')
+    // لا بيانات على البعيد (أو تعذّرت قراءتها بالكامل) — إجهاض السحب تجنّباً لحذف البيانات المحلية
+    throw new Error('لا توجد بيانات على Supabase بعد (أو تعذّرت قراءتها) — أوقفت السحب حماية للبيانات المحلية')
   }
 
   // 2) دمج في المكان داخل صفقة: لا مسح كامل، لا استبدال ملف، لا تعطيل للواجهة

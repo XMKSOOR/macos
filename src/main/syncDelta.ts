@@ -8,7 +8,7 @@ const SAFE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 // مفاتيح إعدادات خاصّة بالمزامنة/الناقل — يجب ألا تنتقل إلى السحابة أبداً،
 // وإلّا تصادمت حالة المزامنة بين الأجهزة (ويندوز/ماك/الجوال) وأوقف بعضها عمل الآخر.
-const META_SETTING_KEY = /^sync_state_/
+const META_SETTING_KEY = /^(sync_state_|sync_force_push_)/
 export function isMetaSettingKey(key: string): boolean {
   return META_SETTING_KEY.test(key) || key === 'sync_transport'
 }
@@ -67,15 +67,29 @@ export function pkColumn(tbl: string): string {
   return pk.name
 }
 
-/** بصمة صف مستقلة عن ترتيب الأعمدة والقيم الفارغة */
+/** توحيد قيمة قبل التوقيع: MySQL/Postgres يعيدان DECIMAL كنص وتاريخ كـ Date —
+ *  حتى تُطابق القيم المحلية (130 و"130" و"130.00" توقيع واحد) فلا تتكرر عمليات رفع بلا داعٍ. */
+function normalizeForSig(v: unknown): unknown {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'boolean') return v ? 1 : 0
+  if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ')
+  if (typeof v === 'number') return Number.isInteger(v) ? v : Math.round(v * 1e6) / 1e6
+  if (typeof v === 'string') {
+    if (/^-?\d+(\.\d+)?$/.test(v)) {
+      const n = Number(v)
+      if (Number.isFinite(n)) return Number.isInteger(n) ? n : Math.round(n * 1e6) / 1e6
+    }
+    return v
+  }
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
+
+/** بصمة صف مستقلة عن ترتيب الأعمدة والقيم الفارغة ونوع البيانات القادم من الخادم */
 export function rowSig(row: Record<string, unknown>): string {
   const o: Record<string, unknown> = {}
   for (const k of Object.keys(row).sort()) {
-    let v = row[k]
-    if (v === null || v === undefined) v = ''
-    else if (typeof v === 'boolean') v = v ? 1 : 0
-    else if (typeof v === 'object') v = JSON.stringify(v)
-    o[k] = v
+    o[k] = normalizeForSig(row[k])
   }
   return createHash('sha1').update(JSON.stringify(o)).digest('hex')
 }
@@ -100,6 +114,26 @@ export function saveBaseline(transport: string, tbl: string, rows: Record<string
   const ins = db.prepare(`INSERT OR REPLACE INTO \`${META}\` (transport, tbl, id, sig) VALUES (?,?,?,?)`)
   for (const r of visibleRows(tbl, rows)) {
     ins.run(transport, tbl, String((r as Record<string, unknown>)[pk] ?? ''), rowSig(r))
+  }
+}
+
+/**
+ * يضيف بصمات لصفوف محددة فقط دون مسح البصمات القائمة. يُستعمل لبذر الصفوف الافتراضية:
+ * جهاز جديد يزرع نفس المواد/الأدوية/القوالب بمعرّفات UUID ثابتة فتُوسم «كأنها مزامنة»،
+ * حتى لا تدفّع البذرة أسعارها فوق أسعار السحابة المعدّلة، وتُقبل أسعار السحابة عند أول سحب.
+ */
+export function ensureSeedBaselines(transport: string, tbl: string, rows: Record<string, unknown>[]): void {
+  if (rows.length === 0) return
+  ensureDeltaTable()
+  assertSafeName(tbl)
+  const db = getDb()
+  const pk = pkColumn(tbl)
+  const existing = readBaseline(transport, tbl)
+  const ins = db.prepare(`INSERT OR IGNORE INTO \`${META}\` (transport, tbl, id, sig) VALUES (?,?,?,?)`)
+  for (const r of rows) {
+    const id = String((r as Record<string, unknown>)[pk] ?? '')
+    if (!id || existing.has(id)) continue
+    ins.run(transport, tbl, id, rowSig(r))
   }
 }
 
@@ -137,6 +171,8 @@ export function planPush(
  */
 export function mergeDeletes(transport: string, tbl: string, remoteRows: Record<string, unknown>[]): number {
   assertSafeName(tbl)
+  // جدول بعيد فارغ تماماً: لا نحذف المحلي (قد يعني أن السحابة لم تُبذَر بعد، لا أن المستخدم حذف الكل)
+  if (remoteRows.length === 0) return 0
   const baseline = readBaseline(transport, tbl)
   if (baseline.size === 0) return 0
   const pk = pkColumn(tbl)
@@ -218,6 +254,7 @@ export function mergeUpserts(
         // صف جديد من البعيد
         if (insStmt) insStmt.run(...cols.map((c) => normalizeValue(r[c])))
         inserted++
+        localSig.set(id, remoteSig)
       }
       // موجود في الأساس لكن غائب محلياً = حذفه المستخدم محلياً → لن نُعيده
       continue
@@ -228,6 +265,7 @@ export function mergeUpserts(
     if (!localDirty && remoteDirty) {
       if (updStmt) updStmt.run(...fields.map((c) => normalizeValue(r[c])), id)
       updated++
+      localSig.set(id, remoteSig)
     }
     // localDirty → المحلي يفوز، لا نلمسه
   }
@@ -262,6 +300,7 @@ export function mergeIntoLocal(
     }
     for (const t of insertOrder) {
       if (!data[t] || skip.has(t)) continue
+      if (data[t].length === 0) continue // بعيد فارغ: لا نُوسم البصمة حتى يُرفَع المحلي في دورة لاحقة
       const rows = db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
       saveBaseline(transport, t, rows)
     }

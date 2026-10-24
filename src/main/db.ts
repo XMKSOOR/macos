@@ -5,6 +5,8 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { dataDir, dbFilePath } from './config'
 import { dedupeAppointments, dedupeCatalog, dedupeExpenses, dedupeMaterials, seedDefaultData, upgradePricesToStudy, upgradeSeedsToStudy } from './seed'
 import { newId, stableId } from './ids'
+import { ensureSeedBaselines } from './syncDelta'
+import { SEED_CATALOG, SEED_MATERIALS } from '../shared/seedData'
 import type {
   Appointment,
   CatalogBomInput,
@@ -54,7 +56,13 @@ function latinDigits(s: string): string {
 /** رقم مُطبَّع من نص قد يحوي أرقاماً عربية/فارسية (يعيد NaN عند التعذّر) */
 function numAny(s: unknown): number {
   const n = Number(latinDigits(String(s ?? '').trim()))
-  return Number.isFinite(n) ? n : Number.NaN
+  return Number.isFinite(n) ? n : NaN
+}
+/** معرّف ثابت لصف بذر مشتق من اسمه الموحّد (أرقام لاتينية + trim) — تتفق عليه كل الأجهزة فلا تتكرر صفوف البذر */
+export function seedStableId(tbl: string, name: string): string | null {
+  const key = latinDigits(String(name ?? '')).trim()
+  if (!key) return null
+  return stableId(tbl, key)
 }
 export function getDb(): DatabaseSync {
   return db
@@ -97,6 +105,7 @@ export function initDb(): void {
   dedupeMaterials()
   dedupeAppointments()
   dedupeExpenses()
+  stabilizeSeedIds()
   repairZeroMaterialTotals()
 }
 
@@ -671,16 +680,41 @@ export function recalcUsd(): void {
   db.exec(`UPDATE invoice_items SET cost_usd=${R('cost', '(SELECT usd_rate FROM invoices WHERE invoices.id=invoice_items.invoice_id)')}`)
 }
 
+/**
+ * يوسم صف بذر بمعرّف ثابت ببصمة «مزامنة» في كل ناقل لم يُزامَن قط (لا يوجد sync_state له)
+ * — حتى لا تدفع البذرة أسعارها الافتراضية فوق أسعار السحابة المعدّلة، وتُقبل أسعار السحابة عند أول سحب.
+ * لا يُستدعى إلا مرة واحدة عند إنشاء الصف (بذر أولي) لا عند كل إقلاع.
+ */
+export function markSeedBaselines(tbl: string, id: string): void {
+  try {
+    const row = db.prepare(`SELECT * FROM \`${tbl}\` WHERE id=?`).get(id) as unknown as Record<string, unknown> | undefined
+    if (!row) return
+    for (const transport of ['cloud', 'mysql']) {
+      const state = db.prepare('SELECT value FROM settings WHERE key=?').get(`sync_state_${transport}`) as
+        | { value?: string }
+        | undefined
+      if (state?.value) continue // الناقل زامن من قبل — البصمة موجودة أصلاً أو الرفع التفرقي سيتكفّل
+      ensureSeedBaselines(transport, tbl, [row])
+    }
+  } catch (e) {
+    console.error('وسم بصمة صف البذر فشل:', e)
+  }
+}
+
 function seed(): void {
-  const users = db.prepare('SELECT COUNT(*) AS c FROM users').get() as unknown as { c: number }
-  if (users.c === 0) {
+  const admin = db.prepare("SELECT COUNT(*) AS c FROM users WHERE username='admin'").get() as unknown as { c: number }
+  if (Number(admin?.c ?? 0) === 0) {
     const hash = hashPassword('admin123')
-    db.prepare('INSERT INTO users (username, password_hash, role, full_name) VALUES (?,?,?,?)').run(
+    // معرّف ثابت: كل الأجهزة تتفق على صف «admin» الواحد بدل صفوف متكرّرة بمعرّفات عشوائية
+    const adminId = seedStableId('users', 'admin')!
+    db.prepare('INSERT INTO users (id, username, password_hash, role, full_name) VALUES (?,?,?,?,?)').run(
+      adminId,
       'admin',
       hash,
       'admin',
       'مدير النظام'
     )
+    markSeedBaselines('users', adminId)
   }
   const defaults: [string, string][] = [
     ['clinic_name', 'عيادتي لطب الأسنان'],
@@ -1059,16 +1093,28 @@ function medicineValues(m: MedicineInput): (string | number)[] {
   ]
 }
 
+/** بذر الأدوية الافتراضية: صف واحد لكل دواء بمعرّف ثابت مشتق من الاسم — يتخطّى الأسماء الموجودة.
+ *  جهاز جديد يزرع نفس الأدوية بنفس المعرّفات فلا تتكرر عبر السحابة. */
 function seedMedicines(): void {
-  const row = db.prepare('SELECT COUNT(*) AS c FROM medicines').get() as { c: number }
-  if (Number(row?.c ?? 0) > 0) return
+  const existing = new Set(
+    (db.prepare('SELECT trade_name FROM medicines').all() as unknown as { trade_name: string }[]).map((r) =>
+      latinDigits(r.trade_name ?? '').trim().toLowerCase()
+    )
+  )
   const stmt = db.prepare(
-    `INSERT INTO medicines (${MEDICINE_COLS.join(', ')}) VALUES (${MEDICINE_COLS.map(() => '?').join(', ')})`
+    `INSERT INTO medicines (id, ${MEDICINE_COLS.join(', ')}) VALUES (?, ${MEDICINE_COLS.map(() => '?').join(', ')})`
   )
   const tx = db.prepare('BEGIN')
   tx.run()
   try {
-    for (const m of SEED_MEDICINES) stmt.run(...medicineValues(m))
+    for (const m of SEED_MEDICINES) {
+      const key = latinDigits(m.trade_name).trim().toLowerCase()
+      if (existing.has(key)) continue
+      const id = seedStableId('medicines', m.trade_name)
+      if (!id) continue
+      stmt.run(id, ...medicineValues(m))
+      markSeedBaselines('medicines', id)
+    }
     db.prepare('COMMIT').run()
   } catch (e) {
     db.prepare('ROLLBACK').run()
@@ -1076,38 +1122,51 @@ function seedMedicines(): void {
   }
 }
 
-/** قوالب الإجراءات الشائعة (تُزرع مرة واحدة) */
+/** قوالب الإجراءات الشائعة (بذر per-row بمعرّفات ثابتة يتخطّى الأسماء الموجودة) */
+const SEED_PROCEDURES: { name: string; category: string; cost: number; materials: string }[] = [
+  { name: 'فحص وتشخيص', category: 'تشخيص', cost: 0, materials: '' },
+  { name: 'صورة أشعة (بريو أبيكال)', category: 'تشخيص', cost: 0, materials: '' },
+  { name: 'صورة أشعة بانورامية', category: 'تشخيص', cost: 0, materials: '' },
+  { name: 'تنظيف وإزالة الجير', category: 'وقائي', cost: 0, materials: '' },
+  { name: 'حشوة وقائية (Sealant)', category: 'وقائي', cost: 0, materials: '' },
+  { name: 'فلورايد موضعي', category: 'وقائي', cost: 0, materials: '' },
+  { name: 'حشوة كومبوزيت', category: 'ترميمي', cost: 0, materials: 'كومبوزيت، بوندينج' },
+  { name: 'حشوة أمالغم', category: 'ترميمي', cost: 0, materials: 'أمالغم' },
+  { name: 'إعادة ترميم حشوة', category: 'ترميمي', cost: 0, materials: '' },
+  { name: 'علاج عصب (قناة جذر)', category: 'لبّي', cost: 0, materials: 'مبارد، جوتا بيركا' },
+  { name: 'إعادة علاج عصب', category: 'لبّي', cost: 0, materials: '' },
+  { name: 'خلع بسيط', category: 'جراحي', cost: 0, materials: 'تخدير موضعي' },
+  { name: 'خلع جراحي (ضرس عقل)', category: 'جراحي', cost: 0, materials: 'تخدير، خيوط' },
+  { name: 'تاج زيركون', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'تاج بورسلين/معدن', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'جسر ثابت', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'زراعة سن', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'طقم جزئي', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'طقم كامل', category: 'تعويضي', cost: 0, materials: '' },
+  { name: 'علاج لثة (تقليح وتنعيم الجذور)', category: 'لثة', cost: 0, materials: '' },
+  { name: 'تبييض الأسنان', category: 'تجميلي', cost: 0, materials: 'جل تبييض' },
+  { name: 'تركيب تقويم', category: 'تقويم', cost: 0, materials: '' }
+]
+
 function seedProcedureTemplates(): void {
-  const row = db.prepare('SELECT COUNT(*) AS c FROM procedure_templates').get() as { c: number }
-  if (Number(row?.c ?? 0) > 0) return
-  const SEED: { name: string; category: string; cost: number; materials: string }[] = [
-    { name: 'فحص وتشخيص', category: 'تشخيص', cost: 0, materials: '' },
-    { name: 'صورة أشعة (بريو أبيكال)', category: 'تشخيص', cost: 0, materials: '' },
-    { name: 'صورة أشعة بانورامية', category: 'تشخيص', cost: 0, materials: '' },
-    { name: 'تنظيف وإزالة الجير', category: 'وقائي', cost: 0, materials: '' },
-    { name: 'حشوة وقائية (Sealant)', category: 'وقائي', cost: 0, materials: '' },
-    { name: 'فلورايد موضعي', category: 'وقائي', cost: 0, materials: '' },
-    { name: 'حشوة كومبوزيت', category: 'ترميمي', cost: 0, materials: 'كومبوزيت، بوندينج' },
-    { name: 'حشوة أمالغم', category: 'ترميمي', cost: 0, materials: 'أمالغم' },
-    { name: 'إعادة ترميم حشوة', category: 'ترميمي', cost: 0, materials: '' },
-    { name: 'علاج عصب (قناة جذر)', category: 'لبّي', cost: 0, materials: 'مبارد، جوتا بيركا' },
-    { name: 'إعادة علاج عصب', category: 'لبّي', cost: 0, materials: '' },
-    { name: 'خلع بسيط', category: 'جراحي', cost: 0, materials: 'تخدير موضعي' },
-    { name: 'خلع جراحي (ضرس عقل)', category: 'جراحي', cost: 0, materials: 'تخدير، خيوط' },
-    { name: 'تاج زيركون', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'تاج بورسلين/معدن', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'جسر ثابت', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'زراعة سن', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'طقم جزئي', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'طقم كامل', category: 'تعويضي', cost: 0, materials: '' },
-    { name: 'علاج لثة (تقليح وتنعيم الجذور)', category: 'لثة', cost: 0, materials: '' },
-    { name: 'تبييض الأسنان', category: 'تجميلي', cost: 0, materials: 'جل تبييض' },
-    { name: 'تركيب تقويم', category: 'تقويم', cost: 0, materials: '' }
-  ]
-  const stmt = db.prepare('INSERT INTO procedure_templates (name, category, default_cost, materials) VALUES (?,?,?,?)')
+  const existing = new Set(
+    (db.prepare('SELECT name FROM procedure_templates').all() as unknown as { name: string }[]).map((r) =>
+      latinDigits(r.name ?? '').trim().toLowerCase()
+    )
+  )
+  const stmt = db.prepare(
+    'INSERT INTO procedure_templates (id, name, category, default_cost, materials) VALUES (?,?,?,?,?)'
+  )
   db.prepare('BEGIN').run()
   try {
-    for (const t of SEED) stmt.run(t.name, t.category, t.cost, t.materials)
+    for (const t of SEED_PROCEDURES) {
+      const key = latinDigits(t.name).trim().toLowerCase()
+      if (existing.has(key)) continue
+      const id = seedStableId('procedure_templates', t.name)
+      if (!id) continue
+      stmt.run(id, t.name, t.category, t.cost, t.materials)
+      markSeedBaselines('procedure_templates', id)
+    }
     db.prepare('COMMIT').run()
   } catch (e) {
     db.prepare('ROLLBACK').run()
@@ -1393,10 +1452,15 @@ export function getCatalogItem(id: string): CatalogItem | undefined {
   return row ? catalogRow(row) : undefined
 }
 
+/** معرّف ثابت لصف ربط (صنف، مادة): تتفق كل الأجهزة على نفس المعرّف فلا تتكرر صفوف BOM عبر السحابة */
+export function bomRowId(catalogId: string, materialId: string): string {
+  return stableId('catalog_materials', `${catalogId}:${materialId}`)!
+}
+
 function syncBom(catalogId: string, resources: CatalogBomInput[]): void {
   db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?').run(catalogId)
-  const ins = db.prepare('INSERT INTO catalog_materials (catalog_id, material_id, qty) VALUES (?,?,?)')
-  for (const m of resources) ins.run(catalogId, m.material_id, m.qty)
+  const ins = db.prepare('INSERT INTO catalog_materials (id, catalog_id, material_id, qty) VALUES (?,?,?,?)')
+  for (const m of resources) ins.run(bomRowId(catalogId, m.material_id), catalogId, m.material_id, m.qty)
 }
 
 function recalcCatalogUsd(id: string): void {
@@ -1415,6 +1479,7 @@ export function createCatalogItem(
     qty?: number
     total?: number
     materials?: CatalogBomInput[]
+    id?: string
   }
 ): CatalogItem {
   const name = latinDigits(c.name)
@@ -1425,9 +1490,15 @@ export function createCatalogItem(
   const totalN = numAny(c.total)
   const total = Number.isNaN(totalN) ? 0 : totalN
   return withTx(() => {
-    const r = db
-      .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?) RETURNING id')
-      .get(name, price, qty, total, latinDigits(c.description ?? '')) as unknown as { id: string }
+    const r = (
+      c.id
+        ? db
+            .prepare('INSERT INTO catalog (id, name, price, qty, total, description) VALUES (?,?,?,?,?,?) RETURNING id')
+            .get(c.id, name, price, qty, total, latinDigits(c.description ?? ''))
+        : db
+            .prepare('INSERT INTO catalog (name, price, qty, total, description) VALUES (?,?,?,?,?) RETURNING id')
+            .get(name, price, qty, total, latinDigits(c.description ?? ''))
+    ) as unknown as { id: string }
     const id = r.id
     syncBom(id, c.materials ?? [])
     recalcCatalogUsd(id)
@@ -1528,7 +1599,121 @@ export function repairZeroMaterialTotals(): void {
   }
 }
 
-export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> & { total?: number }): Material {
+/** يُعيد توجيه الأعمدة المرتبطة بجدول إلى معرّف جديد (يُستعمل عند توحيد معرّفات البذر) */
+function repointChildren(childCols: { tbl: string; col: string }[], from: string, to: string): void {
+  for (const c of childCols) {
+    db.prepare(`UPDATE \`${c.tbl}\` SET \`${c.col}\`=? WHERE \`${c.col}\`=?`).run(to, from)
+  }
+}
+
+/** يوحّد معرّفات صفوف البذر في جدول إلى UUID ثابت مشتق من الاسم: يدمج صفوف الاسم الواحد،
+ *  يُعيد توجيه الأبناء، ثم يسمّي الناجي بالمعرّف الثابت. idempotent — لا يفعل شيئاً إن كانت المعرّفات سليمة. */
+function stabilizeSeedTable(
+  tbl: string,
+  nameCol: string,
+  seedNames: string[],
+  childCols: { tbl: string; col: string }[]
+): void {
+  const target = new Map<string, string>()
+  for (const n of seedNames) {
+    const key = latinDigits(String(n ?? '')).trim().toLowerCase()
+    const id = seedStableId(tbl, n)
+    if (key && id) target.set(key, id)
+  }
+  if (target.size === 0) return
+  const rows = db.prepare(`SELECT id, \`${nameCol}\` AS nm FROM \`${tbl}\``).all() as unknown as {
+    id: string
+    nm: string
+  }[]
+  const groups = new Map<string, { id: string; nm: string }[]>()
+  for (const r of rows) {
+    const key = latinDigits(String(r.nm ?? '')).trim().toLowerCase()
+    if (!target.has(key)) continue
+    const arr = groups.get(key)
+    if (arr) arr.push(r)
+    else groups.set(key, [r])
+  }
+  const del = db.prepare(`DELETE FROM \`${tbl}\` WHERE id=?`)
+  const updId = db.prepare(`UPDATE \`${tbl}\` SET id=? WHERE id=?`)
+  let changed = 0
+  for (const [key, arr] of groups) {
+    const targetId = target.get(key)!
+    const sorted = arr.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    const survivor = sorted.find((r) => r.id === targetId) ?? sorted[0]
+    for (const r of arr) {
+      if (r.id === survivor.id) continue
+      repointChildren(childCols, r.id, survivor.id)
+      del.run(r.id)
+      changed++
+    }
+    if (survivor.id !== targetId) {
+      repointChildren(childCols, survivor.id, targetId)
+      updId.run(targetId, survivor.id)
+      changed++
+    }
+  }
+  if (changed > 0) console.log(`STABILIZE_SEED_IDS ${tbl} ${changed}`)
+}
+
+/** يُعيد كتابة معرّفات صفوف BOM إلى المعرّف الثابت المشتق من (الكتالوج:المادة) بعد توحيد الآباء. */
+function stabilizeBomIds(): void {
+  db.prepare(
+    'DELETE FROM catalog_materials WHERE rowid NOT IN (SELECT MIN(rowid) FROM catalog_materials GROUP BY catalog_id, material_id)'
+  ).run()
+  const rows = db.prepare('SELECT rowid AS rid, id, catalog_id, material_id FROM catalog_materials').all() as unknown as {
+    rid: number
+    id: string
+    catalog_id: string
+    material_id: string
+  }[]
+  const upd = db.prepare('UPDATE catalog_materials SET id=? WHERE rowid=?')
+  let changed = 0
+  for (const r of rows) {
+    const want = bomRowId(r.catalog_id, r.material_id)
+    if (want && r.id !== want) {
+      upd.run(want, r.rid)
+      changed++
+    }
+  }
+  if (changed > 0) console.log(`STABILIZE_SEED_IDS catalog_materials ${changed}`)
+}
+
+/**
+ * توحيد معرّفات صفوف البذر القديمة (UUID عشوائي لكل جهاز) إلى UUID ثابت مشتق من الاسم —
+ * يعمل كل إقلاع لكنه idempotent (لا يفعل شيئاً إن كانت المعرّفات ثابتة أصلاً). هذا ما يمنع
+ * تكرار الأدوية/المواد/الأصناف/القوالب عبر الأجهزة ويجعل أسعار السحابة مستقرة.
+ */
+export function stabilizeSeedIds(): void {
+  try {
+    db.exec('BEGIN')
+    try {
+      db.exec('PRAGMA defer_foreign_keys = ON')
+      stabilizeSeedTable('medicines', 'trade_name', SEED_MEDICINES.map((m) => m.trade_name), [])
+      stabilizeSeedTable('procedure_templates', 'name', SEED_PROCEDURES.map((p) => p.name), [])
+      stabilizeSeedTable('users', 'username', ['admin'], [])
+      stabilizeSeedTable('materials', 'name', SEED_MATERIALS.map((m) => m.name), [
+        { tbl: 'catalog_materials', col: 'material_id' },
+        { tbl: 'stock_movements', col: 'material_id' },
+        { tbl: 'invoice_materials', col: 'material_id' }
+      ])
+      stabilizeSeedTable('catalog', 'name', SEED_CATALOG.map((c) => c.name), [
+        { tbl: 'catalog_materials', col: 'catalog_id' },
+        { tbl: 'invoice_items', col: 'catalog_id' }
+      ])
+      stabilizeBomIds()
+      db.exec('COMMIT')
+    } catch (e) {
+      db.exec('ROLLBACK')
+      throw e
+    }
+  } catch (e) {
+    console.error('توحيد معرّفات صفوف البذر فشل:', e)
+  }
+}
+
+export function createMaterial(
+  m: Omit<Material, 'id' | 'created_at' | 'total'> & { total?: number; id?: string }
+): Material {
   const rate = getSettings().usd_rate
   const clean = { ...m, name: latinDigits(m.name), category: latinDigits(m.category ?? ''), unit: latinDigits(m.unit ?? ''), supplier: latinDigits(m.supplier ?? ''), notes: latinDigits(m.notes ?? '') }
   const costN = numAny(clean.cost)
@@ -1546,7 +1731,7 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> 
     .prepare('SELECT * FROM materials WHERE TRIM(name)=? COLLATE NOCASE')
     .get(clean.name) as unknown as Record<string, unknown> | undefined
   if (existing) {
-    const id = Number(existing.id)
+    const id = String(existing.id)
     const newQty = (Number(existing.quantity) || 0) + quantity
     const newCost = cost > 0 ? cost : Number(existing.cost) || 0
     const newMin = Math.max(Number(existing.min_qty) || 0, minQty)
@@ -1569,9 +1754,17 @@ export function createMaterial(m: Omit<Material, 'id' | 'created_at' | 'total'> 
     )
     return mapMaterialRow(db.prepare('SELECT * FROM materials WHERE id=?').get(id) as unknown as Record<string, unknown>, rate)
   }
-  const r = db
-    .prepare('INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id')
-    .get(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes) as unknown as { id: string }
+  const r = m.id
+    ? (db
+        .prepare(
+          'INSERT INTO materials (id, name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id'
+        )
+        .get(m.id, clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes) as unknown as { id: string })
+    : (db
+        .prepare(
+          'INSERT INTO materials (name, category, unit, quantity, min_qty, cost, cost_usd, total, total_usd, supplier, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING id'
+        )
+        .get(clean.name, clean.category, clean.unit, quantity, minQty, cost, costUsd, total, totalUsd, clean.supplier, clean.notes) as unknown as { id: string })
   return { ...clean, cost, quantity, min_qty: minQty, cost_usd: costUsd, total, total_usd: totalUsd, id: r.id, created_at: new Date().toISOString() }
 }
 

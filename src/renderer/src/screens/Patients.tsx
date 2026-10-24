@@ -117,12 +117,19 @@ export default function Patients({
 
   const exportRows = (rows: Patient[] = list): Record<string, string | number>[] =>
     rows.map((p) => ({
+      id: p.id,
       name: p.name,
       phone: p.phone,
       gender: p.gender,
       birth_date: p.birth_date,
       address: p.address,
-      notes: p.notes
+      national_id: p.national_id ?? '',
+      allergies: p.allergies ?? '',
+      chronic_diseases: p.chronic_diseases ?? '',
+      physiological_status: p.physiological_status ?? '',
+      medical_notes: p.medical_notes ?? '',
+      notes: p.notes,
+      created_at: p.created_at
     }))
 
   if (activeFile !== null) {

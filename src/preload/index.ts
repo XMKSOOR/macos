@@ -235,6 +235,12 @@ records: {
     pull: (): Promise<string> => invoke('cloud:pull'),
     rebuild: (): Promise<string> => invoke('cloud:rebuild'),
     config: (): Promise<boolean> => invoke('cloud:config')
+  },
+  neon: {
+    testDb: (): Promise<string> => invoke('neon:testDb'),
+    testStorage: (): Promise<string> => invoke('neon:testStorage'),
+    testRealtime: (): Promise<string> => invoke('neon:testRealtime'),
+    config: (): Promise<boolean> => invoke('neon:config')
   }
 }
 

@@ -1,4 +1,16 @@
-import { createCatalogItem, createMaterial, getDb, getSettings, listCatalog, listMaterials, recalcUsd, saveSettings } from './db'
+import {
+  bomRowId,
+  createCatalogItem,
+  createMaterial,
+  getDb,
+  getSettings,
+  listCatalog,
+  listMaterials,
+  markSeedBaselines,
+  recalcUsd,
+  saveSettings,
+  seedStableId
+} from './db'
 import { SEED_CATALOG, SEED_MATERIALS, OLD_SEED_MATERIAL_NAMES, OLD_SEED_CATALOG_NAMES } from '../shared/seedData'
 
 export function seedDefaultData(): void {
@@ -8,6 +20,7 @@ export function seedDefaultData(): void {
   for (const m of SEED_MATERIALS) {
     if (materialIds.has(m.name)) continue
     const created = createMaterial({
+      id: seedStableId('materials', m.name) ?? undefined,
       name: m.name,
       category: m.category,
       unit: m.unit,
@@ -18,21 +31,26 @@ export function seedDefaultData(): void {
       notes: m.notes
     })
     materialIds.set(m.name, created.id)
+    markSeedBaselines('materials', created.id)
   }
 
   const known = new Set(listCatalog().map((c) => c.name))
   for (const c of SEED_CATALOG) {
     if (known.has(c.name)) continue
-    createCatalogItem({
+    const bom = c.materials.map((x) => {
+      const id = materialIds.get(x.material)
+      if (id === undefined) throw new Error('مادة غير موجودة في بيانات الأساس: ' + x.material)
+      return { material_id: id, qty: x.qty }
+    })
+    const created = createCatalogItem({
+      id: seedStableId('catalog', c.name) ?? undefined,
       name: c.name,
       price: c.price,
       description: c.description,
-      materials: c.materials.map((x) => {
-        const id = materialIds.get(x.material)
-        if (id === undefined) throw new Error('مادة غير موجودة في بيانات الأساس: ' + x.material)
-        return { material_id: id, qty: x.qty }
-      })
+      materials: bom
     })
+    markSeedBaselines('catalog', created.id)
+    for (const b of bom) markSeedBaselines('catalog_materials', bomRowId(created.id, b.material_id))
   }
 }
 
@@ -84,12 +102,16 @@ export function upgradePricesToStudy(): void {
       const selMat = db.prepare('SELECT id FROM materials WHERE name=?')
       const updMat = db.prepare('UPDATE materials SET category=?, unit=?, min_qty=?, cost=?, supplier=?, notes=?, total = ? * quantity WHERE id=?')
       const insMat = db.prepare(
-        "INSERT INTO materials (name, category, unit, quantity, min_qty, cost, total, supplier, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?, datetime('now','localtime'))"
+        "INSERT INTO materials (id, name, category, unit, quantity, min_qty, cost, total, supplier, notes, created_at) VALUES (?,?,?,?,?,?,?,?,?,?, datetime('now','localtime'))"
       )
       for (const m of SEED_MATERIALS) {
         const row = selMat.get(m.name) as { id: string } | undefined
         if (row) updMat.run(m.category, m.unit, m.min_qty, m.cost, m.supplier, m.notes, m.cost, row.id)
-        else insMat.run(m.name, m.category, m.unit, m.quantity, m.min_qty, m.cost, m.cost * m.quantity, m.supplier, m.notes)
+        else {
+          const mid = seedStableId('materials', m.name)!
+          insMat.run(mid, m.name, m.category, m.unit, m.quantity, m.min_qty, m.cost, m.cost * m.quantity, m.supplier, m.notes)
+          markSeedBaselines('materials', mid)
+        }
       }
 
       const ids = new Map<string, string>()
@@ -100,10 +122,10 @@ export function upgradePricesToStudy(): void {
       const selCat = db.prepare('SELECT id FROM catalog WHERE name=?')
       const updCat = db.prepare('UPDATE catalog SET price=?, description=? WHERE id=?')
       const insCat = db.prepare(
-        "INSERT INTO catalog (name, price, description, created_at) VALUES (?,?,?, datetime('now','localtime')) RETURNING id"
+        "INSERT INTO catalog (id, name, price, description, created_at) VALUES (?,?,?,?, datetime('now','localtime')) RETURNING id"
       )
       const delBom = db.prepare('DELETE FROM catalog_materials WHERE catalog_id=?')
-      const insBom = db.prepare('INSERT INTO catalog_materials (catalog_id, material_id, qty) VALUES (?,?,?)')
+      const insBom = db.prepare('INSERT INTO catalog_materials (id, catalog_id, material_id, qty) VALUES (?,?,?,?)')
       for (const c of SEED_CATALOG) {
         const row = selCat.get(c.name) as { id: string } | undefined
         let cid: string
@@ -111,13 +133,16 @@ export function upgradePricesToStudy(): void {
           updCat.run(c.price, c.description, row.id)
           cid = row.id
         } else {
-          cid = (insCat.get(c.name, c.price, c.description) as unknown as { id: string }).id
+          const catId = seedStableId('catalog', c.name)!
+          cid = (insCat.get(catId, c.name, c.price, c.description) as unknown as { id: string }).id
+          markSeedBaselines('catalog', cid)
         }
         delBom.run(cid)
         for (const b of c.materials) {
           const mid = ids.get(b.material)
           if (mid === undefined) throw new Error('مادة غير موجودة في بيانات الأساس: ' + b.material)
-          insBom.run(cid, mid, b.qty)
+          insBom.run(bomRowId(cid, mid), cid, mid, b.qty)
+          markSeedBaselines('catalog_materials', bomRowId(cid, mid))
         }
       }
       db.prepare('COMMIT').run()

@@ -127,6 +127,10 @@ import { cloudPull, cloudPush, cloudTest, cloudRebuild } from './cloud'
 import { markDirty, resetSyncForRestore } from './autoSync'
 import { dataDir, setConfig } from './config'
 import { app, dialog, shell } from 'electron'
+import { testNeonDb } from './neon/db'
+import { testNeonStorage } from './neon/storage'
+import { testNeonRealtime } from './neon/realtime'
+import { neonConfig } from './neon/config'
 
 let currentUser: User | null = null
 
@@ -904,6 +908,21 @@ export function registerIpc(ipc: IpcMain): void {
     return cloudRebuild()
   })
   handle('cloud:config', () => !!supabaseConfig())
+
+  // ---- Neon ----
+  handle('neon:testDb', async () => {
+    requireAuth('manageSettings')
+    return testNeonDb()
+  })
+  handle('neon:testStorage', async () => {
+    requireAuth('manageSettings')
+    return testNeonStorage()
+  })
+  handle('neon:testRealtime', async () => {
+    requireAuth('manageSettings')
+    return testNeonRealtime()
+  })
+  handle('neon:config', () => !!neonConfig())
 }
 
 function buildReceiptHtml(

@@ -1,114 +1,7 @@
 import mysql from 'mysql2/promise'
 import { getDb, getSettings } from './db'
-import { fingerprintTables } from './syncCore'
-import { planPush, saveBaseline, mergeIntoLocal, pkColumn } from './syncDelta'
-
-// الجداول المركّبة كاملة (نسخة معكوسة) على MySQL
-const SYNC_TABLES: string[] = [
-  'users',
-  'patients',
-  'patient_medications',
-  'medicines',
-  'materials',
-  'catalog',
-  'catalog_materials',
-  'appointments',
-  'invoices',
-  'invoice_items',
-  'invoice_materials',
-  'stock_movements',
-  'expenses',
-  'dental_charts',
-  'treatment_plans',
-  'treatment_plan_items',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
-
-// ترتيب الحذف (الأبناء أولاً لاحترام قيود المفاتيح محلياً في SQLite)
-const DELETE_ORDER: string[] = [
-  'treatment_plan_items',
-  'treatment_plans',
-  'invoice_materials',
-  'invoice_items',
-  'invoices',
-  'appointments',
-  'catalog_materials',
-  'stock_movements',
-  'catalog',
-  'materials',
-  'expenses',
-  'patient_medications',
-  'dental_charts',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'medicines',
-  'patients',
-  'users',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
-
-const INSERT_ORDER: string[] = [
-  'users',
-  'patients',
-  'patient_medications',
-  'medicines',
-  'materials',
-  'catalog',
-  'catalog_materials',
-  'appointments',
-  'invoices',
-  'invoice_items',
-  'invoice_materials',
-  'stock_movements',
-  'expenses',
-  'treatment_plans',
-  'treatment_plan_items',
-  'dental_charts',
-  'periodontal_charts',
-  'recall_reminders',
-  'tooth_history',
-  'anesthesia_records',
-  'lab_cases',
-  'implant_records',
-  'consent_forms',
-  'risk_assessments',
-  'referrals',
-  'procedure_templates',
-  'insurance_fees',
-  'sterilization_log',
-  'education_materials',
-  'postop_instructions',
-  'clinical_note_templates',
-  'settings'
-]
+import { fingerprintTables, DELETE_ORDER, INSERT_ORDER, SYNC_TABLES, runExclusive } from './syncCore'
+import { planPush, saveBaseline, mergeIntoLocal, pkColumn, clearBaselines } from './syncDelta'
 
 const TRANSPORT = 'mysql'
 
@@ -169,19 +62,34 @@ function mysqlType(t: string): string {
   return 'TEXT'
 }
 
+/** عمود المفتاح الأساسي في SQLite (id لكل الجداول، key لجدول الإعدادات) */
+function pkOf(cols: ColInfo[]): ColInfo | undefined {
+  return cols.find((c) => c.pk === 1)
+}
+
+/** نوع MySQL الآمن للمفتاح النصّي UUID: VARCHAR بدل TEXT حتى يقبل PRIMARY KEY/UNIQUE */
+function pkMysqlType(tbl: string, col: ColInfo): string {
+  if (tbl === 'settings' && col.name === 'key') return 'VARCHAR(191)'
+  return 'VARCHAR(64)'
+}
+
 async function ensureSchema(c: mysql.Connection): Promise<void> {
-  for (const t of localTables()) {
+  const tables = localTables()
+  // 1) إنشاء الجداول المفقودة — مع مفتاح أساسي دائماً (حتى لو كان المفتاح نصّاً UUID)
+  for (const t of tables) {
+    const pk = pkOf(t.cols)
     const defs = t.cols
       .map((col) => {
-        const type = mysqlType(col.type)
-        const pk = col.pk && type === 'INT' ? ' NOT NULL PRIMARY KEY' : ''
-        return `\`${col.name}\` ${type}${pk}`
+        const type = pk && col.name === pk.name ? pkMysqlType(t.name, col) : mysqlType(col.type)
+        const notNull = pk && col.name === pk.name ? ' NOT NULL' : ''
+        return `\`${col.name}\` ${type}${notNull}`
       })
       .join(', ')
-    await c.query(`CREATE TABLE IF NOT EXISTS \`${t.name}\` (${defs}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+    const pkSql = pk ? `, PRIMARY KEY (\`${pk.name}\`)` : ''
+    await c.query(`CREATE TABLE IF NOT EXISTS \`${t.name}\` (${defs}${pkSql}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
   }
-  // تطور الجداول: إضافة الأعمدة الجديدة (مثل مبالغ الدولار) للأعمدة الموجودة مسبقاً
-  for (const t of localTables()) {
+  // 2) تطور الجداول: إضافة الأعمدة الجديدة (مثل مبالغ الدولار) للأعمدة الموجودة مسبقاً
+  for (const t of tables) {
     const [remote] = await c.query(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?`,
       [t.name]
@@ -189,15 +97,48 @@ async function ensureSchema(c: mysql.Connection): Promise<void> {
     const have = new Set(remote.map((r) => r.COLUMN_NAME))
     for (const col of t.cols) {
       if (!have.has(col.name)) {
-        await c.query(`ALTER TABLE \`${t.name}\` ADD COLUMN \`${col.name}\` ${mysqlType(col.type)}`)
+        const type = mysqlType(col.type)
+        await c.query(`ALTER TABLE \`${t.name}\` ADD COLUMN \`${col.name}\` ${type}`)
       }
     }
+  }
+  // 3) إصلاح الجداول القديمة بلا مفتاح أساسي (سبب تكرار الصفوف في كل رفع):
+  //    حذف النسخ المكرّرة بنفس المفتاح ثم إضافة PRIMARY KEY حتى يعمل ON DUPLICATE KEY UPDATE
+  for (const t of tables) {
+    const pk = pkOf(t.cols)
+    if (!pk) continue
+    const [cols] = (await c.query(
+      `SELECT COLUMN_NAME, COLUMN_KEY FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?`,
+      [t.name]
+    )) as unknown as [{ COLUMN_NAME: string; COLUMN_KEY: string }[], unknown]
+    const hasPk = cols.some((r) => r.COLUMN_KEY === 'PRI')
+    if (hasPk) continue
+    console.warn(`[SYNC:mysql] إصلاح الجدول ${t.name}: إزالة الصفوف المكرّرة ثم إضافة PRIMARY KEY على ${pk.name}`)
+    // احتفظ بصف واحد لكل مفتاح ثم أعد ضبط عمود المفتاح وأضف PRIMARY KEY
+    await c.query(`ALTER TABLE \`${t.name}\` ADD COLUMN \`_sync_fix\` INT NULL`)
+    await c.query(
+      `UPDATE \`${t.name}\` SET \`_sync_fix\` = ROW_NUMBER() OVER (PARTITION BY \`${pk.name}\` ORDER BY \`${pk.name}\`)`
+    )
+    await c.query(`DELETE FROM \`${t.name}\` WHERE \`_sync_fix\` > 1`)
+    await c.query(`ALTER TABLE \`${t.name}\` DROP COLUMN \`_sync_fix\``)
+    await c.query(`ALTER TABLE \`${t.name}\` MODIFY \`${pk.name}\` ${pkMysqlType(t.name, pk)} NOT NULL`)
+    await c.query(`ALTER TABLE \`${t.name}\` ADD PRIMARY KEY (\`${pk.name}\`)`)
   }
 }
 
 function readLocalRows(t: string): Record<string, unknown>[] {
   const db = getDb()
   return db.prepare(`SELECT * FROM \`${t}\``).all() as unknown as Record<string, unknown>[]
+}
+
+/** يفحص إن كان خادم MySQL فارغاً تماماً (لم يُبذَر بعد) — عندها نُصفّر البصمات ليرفع
+ *  هذا الجهاز نسخته كاملة بدل أن تبقى السحابة فارغة بسبب بصمات البذر المحلية. */
+async function mysqlRemoteEmpty(c: mysql.Connection): Promise<boolean> {
+  for (const t of SYNC_TABLES) {
+    const [rows] = (await c.query(`SELECT 1 FROM \`${t}\` LIMIT 1`)) as unknown as [unknown[], unknown]
+    if (rows.length > 0) return false
+  }
+  return true
 }
 
 export function mysqlPullChanged(): number {
@@ -305,9 +246,17 @@ async function pushPlans(
 }
 
 export async function mysqlPush(): Promise<string> {
+  return runExclusive(TRANSPORT, () => mysqlPushUnlocked())
+}
+
+async function mysqlPushUnlocked(): Promise<string> {
   const c = await connect()
   try {
     await ensureSchema(c)
+    if (await mysqlRemoteEmpty(c)) {
+      console.log('[SYNC:mysql] push: الخادم فارغ — تصفير البصمات لرفع نسخة كاملة من هذا الجهاز')
+      clearBaselines(TRANSPORT)
+    }
     const plans = capturePlans()
     await c.query('SET FOREIGN_KEY_CHECKS=0')
     try {
@@ -337,9 +286,17 @@ export async function mysqlPush(): Promise<string> {
  * ثم ترفع تغييرات المحلي. تُعيد عدد الصفوف التي غيّرها السحب.
  */
 export async function mysqlSync(): Promise<number> {
+  return runExclusive(TRANSPORT, () => mysqlSyncUnlocked())
+}
+
+async function mysqlSyncUnlocked(): Promise<number> {
   const c = await connect()
   try {
     await ensureSchema(c)
+    if (await mysqlRemoteEmpty(c)) {
+      console.log('[SYNC:mysql] sync: الخادم فارغ — تصفير البصمات لرفع نسخة كاملة من هذا الجهاز')
+      clearBaselines(TRANSPORT)
+    }
     const plans = capturePlans()
 
     const data: Record<string, Record<string, unknown>[]> = {}
@@ -386,11 +343,16 @@ export async function mysqlSync(): Promise<number> {
 function mysqlValue(v: unknown): string | number | null {
   if (v === null || v === undefined) return null
   if (typeof v === 'boolean') return v ? 1 : 0
+  if (v instanceof Date) return v.toISOString().slice(0, 19).replace('T', ' ')
   if (typeof v === 'object') return JSON.stringify(v)
   return v as string | number
 }
 
 export async function mysqlPull(): Promise<string> {
+  return runExclusive(TRANSPORT, () => mysqlPullUnlocked())
+}
+
+async function mysqlPullUnlocked(): Promise<string> {
   const c = await connect()
   try {
     await ensureSchema(c)

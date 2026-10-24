@@ -76,11 +76,15 @@ function units(): SyncUnit[] {
     {
       id: 'drive',
       autoOn: () =>
-        (s.drive_auto ?? '0') === '1' && !!(s.drive_client_id ?? '').trim() && !!(s.drive_client_secret ?? '').trim(),
-      whyOff: () =>
-        (s.drive_auto ?? '0') !== '1'
-          ? 'drive_auto != 1'
-          : 'مفاتيح Google Drive غير مكتملة في الإعدادات',
+        (s.drive_auto ?? '0') === '1' &&
+        !!(s.drive_client_id ?? '').trim() &&
+        !!(s.drive_client_secret ?? '').trim() &&
+        !cloudConfig(),
+      whyOff: () => {
+        if (!!cloudConfig()) return 'مزامنة Postgres مفعّلة — مزامنة Google Drive معطّلة لتجنّب تعارض استبدال ملف القاعدة'
+        if ((s.drive_auto ?? '0') !== '1') return 'drive_auto != 1'
+        return 'مفاتيح Google Drive غير مكتملة في الإعدادات'
+      },
       fetchRemote: async () => driveRemote(),
       push: async () => {
         await driveUpload()

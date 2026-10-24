@@ -342,6 +342,11 @@ export type SheetSchemaKey =
   | 'users'
   | 'invoices'
   | 'movements'
+  | 'medicines'
+  | 'medications'
+  | 'dental'
+  | 'treatment_plans'
+  | 'recall'
 
 export interface SheetCol {
   key: string
@@ -463,6 +468,75 @@ export const SHEET_SCHEMAS: SheetSchema[] = [
       { key: 'reference', header: 'المرجع' },
       { key: 'user_name', header: 'المستخدم' },
       { key: 'note', header: 'ملاحظة' }
+    ]
+  },
+  {
+    key: 'medicines',
+    label: 'قائمة الأدوية',
+    importable: true,
+    cols: [
+      { key: 'trade_name', header: 'الاسم التجاري', sample: 'أموكسيل 500', aliases: ['trade_name', 'الاسم التجاري'] },
+      { key: 'scientific_name', header: 'الاسم العلمي', sample: 'Amoxicillin 500mg', aliases: ['scientific_name', 'المادة الفعالة'] },
+      { key: 'dose', header: 'الجرعة', sample: '500 ملغ', aliases: ['dose', 'التركيز'] },
+      { key: 'form', header: 'الشكل', sample: 'كبسولات', aliases: ['form', 'شكل'] },
+      { key: 'route', header: 'طريقة الاستخدام', sample: 'فموي', aliases: ['route', 'الطريقة'] },
+      { key: 'frequency', header: 'التكرار', sample: 'كل 8 ساعات', aliases: ['frequency'] },
+      { key: 'category', header: 'التصنيف', sample: 'prescription', aliases: ['category'] }
+    ]
+  },
+  {
+    key: 'medications',
+    label: 'أدوية المرضى',
+    importable: true,
+    cols: [
+      { key: 'patient_id', header: 'معرف المريض', sample: '' },
+      { key: 'scientific_name', header: 'الاسم العلمي', aliases: ['scientific_name'] },
+      { key: 'trade_name', header: 'الاسم التجاري', aliases: ['trade_name'] },
+      { key: 'dose', header: 'الجرعة', aliases: ['dose'] },
+      { key: 'form', header: 'الشكل', aliases: ['form'] },
+      { key: 'route', header: 'الطريقة', aliases: ['route'] },
+      { key: 'frequency', header: 'التكرار', aliases: ['frequency'] },
+      { key: 'start_date', header: 'تاريخ البداية', aliases: ['start_date'] },
+      { key: 'end_date', header: 'تاريخ النهاية', aliases: ['end_date'] },
+      { key: 'category', header: 'التصنيف', aliases: ['category'] },
+      { key: 'prescriber', header: 'الطبيب المعالج', aliases: ['prescriber'] },
+      { key: 'active', header: 'فعال', aliases: ['active'] },
+      { key: 'notes', header: 'ملاحظات', aliases: ['notes'] }
+    ]
+  },
+  {
+    key: 'dental',
+    label: 'مخطط الأسنان',
+    importable: true,
+    cols: [
+      { key: 'patient_id', header: 'معرف المريض', sample: '' },
+      { key: 'tooth_number', header: 'رقم السن', sample: '11', aliases: ['tooth_number'] },
+      { key: 'condition', header: 'الحالة', sample: 'caries', aliases: ['condition'] },
+      { key: 'surfaces', header: 'الأسطح', sample: '', aliases: ['surfaces'] },
+      { key: 'notes', header: 'ملاحظات', sample: '', aliases: ['notes'] }
+    ]
+  },
+  {
+    key: 'treatment_plans',
+    label: 'خطط العلاج',
+    importable: true,
+    cols: [
+      { key: 'patient_id', header: 'معرف المريض', sample: '' },
+      { key: 'title', header: 'العنوان', sample: 'خطة علاج', aliases: ['title'] },
+      { key: 'status', header: 'الحالة', sample: 'proposed', aliases: ['status'] },
+      { key: 'notes', header: 'ملاحظات', sample: '', aliases: ['notes'] }
+    ]
+  },
+  {
+    key: 'recall',
+    label: 'تذكيرات المراجعة',
+    importable: true,
+    cols: [
+      { key: 'patient_id', header: 'معرف المريض', sample: '' },
+      { key: 'recall_type', header: 'النوع', sample: 'checkup', aliases: ['recall_type'] },
+      { key: 'due_date', header: 'تاريخ الاستحقاق', sample: '2026-12-01', aliases: ['due_date'] },
+      { key: 'status', header: 'الحالة', sample: 'pending', aliases: ['status'] },
+      { key: 'notes', header: 'ملاحظات', sample: '', aliases: ['notes'] }
     ]
   }
 ]

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { backupDatabase, getDb, getDbPath, replaceDbFrom } from './db'
+import { isMetaSettingKey } from './syncDelta'
 import { DatabaseSync } from './sqlite'
 
 export type TransportId = 'drive' | 'supabase'
@@ -40,6 +41,99 @@ export const SYNC_TABLES = [
   'clinical_note_templates',
   'settings'
 ] as const
+
+// ترتيب الحذف على الخادم (الأبناء أولاً لاحترام المفاتيح الأجنبية) — مصدر واحد مشترك
+export const DELETE_ORDER: string[] = [
+  'treatment_plan_items',
+  'treatment_plans',
+  'invoice_materials',
+  'invoice_items',
+  'invoices',
+  'appointments',
+  'catalog_materials',
+  'stock_movements',
+  'catalog',
+  'materials',
+  'expenses',
+  'patient_medications',
+  'dental_charts',
+  'periodontal_charts',
+  'recall_reminders',
+  'tooth_history',
+  'anesthesia_records',
+  'lab_cases',
+  'implant_records',
+  'consent_forms',
+  'risk_assessments',
+  'referrals',
+  'medicines',
+  'patients',
+  'users',
+  'procedure_templates',
+  'insurance_fees',
+  'sterilization_log',
+  'education_materials',
+  'postop_instructions',
+  'clinical_note_templates',
+  'settings'
+]
+
+// ترتيب الإدخال (الآباء أولاً) — مصدر واحد مشترك
+export const INSERT_ORDER: string[] = [
+  'users',
+  'patients',
+  'patient_medications',
+  'medicines',
+  'materials',
+  'catalog',
+  'catalog_materials',
+  'appointments',
+  'invoices',
+  'invoice_items',
+  'invoice_materials',
+  'stock_movements',
+  'expenses',
+  'treatment_plans',
+  'treatment_plan_items',
+  'dental_charts',
+  'periodontal_charts',
+  'recall_reminders',
+  'tooth_history',
+  'anesthesia_records',
+  'lab_cases',
+  'implant_records',
+  'consent_forms',
+  'risk_assessments',
+  'referrals',
+  'procedure_templates',
+  'insurance_fees',
+  'sterilization_log',
+  'education_materials',
+  'postop_instructions',
+  'clinical_note_templates',
+  'settings'
+]
+
+// ---- قفل مزامنة عام: يمنع تشغيل مزامنتين متزامنتين (الدورة التلقائية + الأزرار اليدوية) ----
+// أي عملية مزامنة تمرّ عبر runExclusive(key, fn) تنتظر دورها فلا يُرفع نفس الصفوف مرتين.
+const syncLocks = new Map<string, Promise<unknown>>()
+
+export async function runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = syncLocks.get(key) ?? Promise.resolve()
+  const next = prev.then(
+    () => fn(),
+    () => fn()
+  )
+  syncLocks.set(
+    key,
+    next.catch(() => undefined)
+  )
+  try {
+    return await next
+  } finally {
+    if (syncLocks.get(key) === next) syncLocks.delete(key)
+  }
+}
 
 const STATE_PREFIX = 'sync_state_'
 const MAX_LOCAL_BACKUPS = 10
@@ -159,11 +253,7 @@ export function writeSyncState(id: string, s: SyncState): void {
   writeState(id as TransportId, s)
 }
 export function fingerprintSnapshot(buf: Buffer): { hash: string; rows: number } {
-  let rows = 0
-  const h = createHash('sha256')
-  const probe = new (getDb().constructor as new (p: string) => { close(): void })('' + '')
-  probe.close()
-  return { hash: h.update(buf).digest('hex'), rows }
+  return { hash: createHash('sha256').update(buf).digest('hex'), rows: 0 }
 }
 
 export function fingerprintTables(rowsByTable: Record<string, unknown[]>): Fingerprint {
@@ -173,10 +263,7 @@ export function fingerprintTables(rowsByTable: Record<string, unknown[]>): Finge
   for (const t of SYNC_TABLES) {
     let rs = rowsByTable[t] ?? []
     if (t === 'settings') {
-      rs = rs.filter((r) => {
-        const k = (r as { key?: string }).key ?? ''
-        return !k.startsWith(STATE_PREFIX) && k !== 'sync_transport'
-      })
+      rs = rs.filter((r) => !isMetaSettingKey(String((r as { key?: string }).key ?? '')))
     }
     rs = [...rs].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
     perTable[t] = rs.length

@@ -76,6 +76,33 @@ export default function SettingsScreen({
       .finally(() => setBusy(''))
   }
 
+  const testNeonDb = (): void => {
+    setBusy('neonDb')
+    window.clinic.neon
+      .testDb()
+      .then((m) => toast(m, 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const testNeonStorage = (): void => {
+    setBusy('neonStorage')
+    window.clinic.neon
+      .testStorage()
+      .then((m) => toast(m, 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
+  const testNeonRealtime = (): void => {
+    setBusy('neonRealtime')
+    window.clinic.neon
+      .testRealtime()
+      .then((m) => toast(m, 'success'))
+      .catch((e) => toast(e.message, 'error'))
+      .finally(() => setBusy(''))
+  }
+
   const sendCloud = (): void => {
     setBusy('cloudSend')
     window.clinic.cloud
@@ -326,6 +353,28 @@ export default function SettingsScreen({
           <p className="muted mt-8" style={{ fontSize: 12 }}>
             «إرسال» يرفع بيانات هذا الجهاز إلى السحابة، و«استلام» ينزّل بيانات السحابة إلى هذا الجهاز. المزامنة التلقائية تُبقي الأجهزة متطابقة.
           </p>
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h2>Neon (Postgres / Auth / Object Storage / Realtime)</h2>
+        </div>
+        <div className="panel-body">
+          <p className="muted" style={{ fontSize: 12 }}>
+            تم ربط المشروع عبر neon.ts وملف .env. يمكنك اختبار الخدمات مباشرة.
+          </p>
+          <div className="toolbar mt-16">
+            <button className="ghost" onClick={testNeonDb} disabled={busy === 'neonDb'}>
+              اختبار Neon Postgres
+            </button>
+            <button className="ghost" onClick={testNeonStorage} disabled={busy === 'neonStorage'}>
+              اختبار Neon Object Storage
+            </button>
+            <button className="ghost" onClick={testNeonRealtime} disabled={busy === 'neonRealtime'}>
+              اختبار Neon Realtime
+            </button>
+          </div>
         </div>
       </div>
 
